@@ -14,7 +14,7 @@ export default function ProtectedRoute({ allowedRoles, children }: ProtectedRout
   const [loading, setLoading] = useState(true);
   const router = useRouter();
 
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://10.120.248.230:5000";
+  const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://uba-veltech-attendance-backend-system.onrender.com";
 
   useEffect(() => {
     let isMounted = true; 

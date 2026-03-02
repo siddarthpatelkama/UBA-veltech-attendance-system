@@ -42,7 +42,7 @@ export default function AdminPage() {
   const [isPurging, setIsPurging] = useState(false);
   const [selectedPurgeYear, setSelectedPurgeYear] = useState('1');
 
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://10.120.248.230:5000";
+  const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://uba-veltech-attendance-backend-system.onrender.com";
 
   // --- HIGHLY OPTIMIZED ADMIN DATA FETCHING ---
   async function fetchData(forceFetch = false) {

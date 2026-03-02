@@ -44,7 +44,7 @@ export default function HomePage() {
   // --- PERMANENT DEVICE ID STATE ---
   const [deviceId, setDeviceId] = useState<string>('');
 
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://10.120.248.230:5000";
+  const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://uba-veltech-attendance-backend-system.onrender.com";
 
   // ==========================================
   // 1. DEVICE ID GENERATION & NETWORK LOGIC

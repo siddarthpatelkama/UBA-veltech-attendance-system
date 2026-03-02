@@ -8,7 +8,7 @@ import { onAuthStateChanged } from 'firebase/auth';
 export default function NetflixStyleSplash() {
   const [phase, setPhase] = useState(0);
   const router = useRouter();
-  const API_URL = process.env.NEXT_PUBLIC_API_URL ||"http://10.120.248.230:5000";
+  const API_URL = process.env.NEXT_PUBLIC_API_URL ||"https://uba-veltech-attendance-backend-system.onrender.com";
 
   useEffect(() => {
     // 7-Second Animation Timeline

@@ -23,7 +23,7 @@ function AttendanceContent() {
   const [message, setMessage] = useState('Verifying your attendance...');
   const isProcessing = useRef(false);
 
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://10.120.248.230:5000";
+  const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://uba-veltech-attendance-backend-system.onrender.com";
 
   useEffect(() => {
     const dataParam = searchParams.get('data');

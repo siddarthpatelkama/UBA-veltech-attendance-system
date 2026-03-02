@@ -14,7 +14,7 @@ export default function LoginPage() {
   // THE FIX: This lock prevents the double-fetching race condition
   const isRouting = useRef(false); 
 
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://10.120.248.230:5000";
+  const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://uba-veltech-attendance-backend-system.onrender.com";
 
   // --- ROLE-BASED ROUTING ENGINE ---
   const routeUserByRole = async (user: User) => {
