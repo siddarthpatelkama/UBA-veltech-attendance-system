@@ -51,7 +51,7 @@ A high-performance Progressive Web App (PWA) designed to manage field attendance
 
 ### 1) Clone the repository
 ```bash
-git clone https://github.com/siddarthpatelkama/uba-attendance.git
+git clone https://github.com/siddarthpatelkama/UBA-veltech-attendance.git
 ```
 
 ### 2) Install dependencies
