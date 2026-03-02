@@ -1,12 +1,9 @@
 'use client';
 
 import { useEffect } from "react";
-import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
-// --- METADATA CONFIGURATION (PRESERVED) ---
-// Note: In Next.js App Router, 'use client' layout metadata is handled via tags in the return
-// To maintain compatibility with your PWA requirements:
+// Metadata Configuration
 const metadataValues = {
   title: "UBA Attendance | Vel Tech",
   description: "Unnat Bharat Abhiyan Attendance Portal",
@@ -19,9 +16,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
 
-  // ==========================================
   // 1. PWA SERVICE WORKER REGISTRATION
-  // ==========================================
   useEffect(() => {
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", () => {
@@ -36,13 +31,13 @@ export default function RootLayout({
   return (
     <html lang="en">
       <head>
-        {/* --- PWA & SEO TAGS (PRESERVED & EXPANDED) --- */}
         <title>{metadataValues.title}</title>
         <meta name="description" content={metadataValues.description} />
         <link rel="manifest" href={metadataValues.manifest} />
         
-        {/* THE NEW FAVICON LINK */}
+        {/* BRANDING: Using your uba-logo.png as the icon */}
         <link rel="icon" href="/uba-logo.png" />
+        <link rel="apple-touch-icon" href="/uba-logo.png" />
         
         <meta name="theme-color" content="#FF5722" />
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
@@ -51,7 +46,6 @@ export default function RootLayout({
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="default" />
         <meta name="apple-mobile-web-app-title" content="UBA Portal" />
-        <link rel="apple-touch-icon" href="/uba-logo.png" />
       </head>
       <body className="antialiased bg-white text-gray-900 min-h-screen flex flex-col">
         
@@ -60,7 +54,7 @@ export default function RootLayout({
           {children}
         </main>
 
-        {/* GLOBAL DEVELOPER FOOTER (PRESERVED EXACTLY) */}
+        {/* GLOBAL DEVELOPER FOOTER */}
         <footer className="bg-[#FFF9F5] border-t border-[#FF5722]/20 py-8 mt-auto">
           <div className="max-w-7xl mx-auto px-6 flex flex-col md:flex-row justify-between items-center gap-8">
             
@@ -94,7 +88,6 @@ export default function RootLayout({
                  </a>
               </div>
             </div>
-
           </div>
         </footer>
       </body>
