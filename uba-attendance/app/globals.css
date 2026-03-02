@@ -1,0 +1,32 @@
+@import "tailwindcss";
+
+:root {
+  /* Forces the browser to treat this as a light-mode app globally */
+  color-scheme: light; 
+}
+
+body {
+  background-color: #FFFFFF;
+  color: #111827;
+}
+
+/* Custom scrollbar for UBA dashboard */
+@layer utilities {
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+  }
+  
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: #FFF9F5; /* Light orange tint */
+    border-radius: 10px;
+  }
+  
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: #FF8A50; /* UBA Light Orange */
+    border-radius: 10px;
+  }
+  
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: #FF5722; /* UBA Primary Orange */
+  }
+}

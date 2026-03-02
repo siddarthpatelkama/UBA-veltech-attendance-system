@@ -1,0 +1,32 @@
+{
+  "name": "UBA Vel Tech Attendance",
+  "short_name": "UBA Portal",
+  "description": "Unnat Bharat Abhiyan Attendance Management System",
+  "start_url": "/login",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#FF5722",
+  "orientation": "portrait",
+  "scope": "/",
+  "icons": [
+    {
+      "src": "/uba-logo.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/uba-logo.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ],
+  "categories": ["education", "productivity"],
+  "shortcuts": [
+    {
+      "name": "Check History",
+      "url": "/home",
+      "description": "View your scan logs"
+    }
+  ]
+}
