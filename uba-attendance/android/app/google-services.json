@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "414761819857",
+    "project_id": "uba-attendance-3101",
+    "storage_bucket": "uba-attendance-3101.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:414761819857:android:2f6c03d122dc3d5015eff0",
+        "android_client_info": {
+          "package_name": "com.veltech.uba.attendance"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "414761819857-lvb617pu2mc69r7rao6tns4emii3oeh0.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAik97vqfyVmP3eZkPXOhCwMiSBwSin2Ts"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "414761819857-7kce1rh6ht7b1a2eimq42s4jisq35ifn.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

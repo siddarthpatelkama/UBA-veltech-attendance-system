@@ -1,4 +1,4 @@
-'use client';
+"use client";
 
 import { useEffect, useState, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
@@ -14,6 +14,23 @@ const getSafeTime = (val: any, fallback: number = 0) => {
   if (val._seconds) return val._seconds * 1000;
   const d = new Date(val).getTime();
   return isNaN(d) ? fallback : d;
+};
+
+// GLOBAL IST FORMATTER CONFIG
+const IST_OPTIONS: Intl.DateTimeFormatOptions = {
+  timeZone: 'Asia/Kolkata',
+  hour: '2-digit',
+  minute: '2-digit',
+  hour12: true
+};
+
+const IST_FULL_OPTIONS: Intl.DateTimeFormatOptions = {
+  timeZone: 'Asia/Kolkata',
+  month: 'short',
+  day: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+  hour12: true
 };
 
 export default function AdminPage() {
@@ -44,11 +61,10 @@ export default function AdminPage() {
 
   const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://uba-veltech-attendance-backend-system.onrender.com";
 
-  // --- HIGHLY OPTIMIZED ADMIN DATA FETCHING ---
+  // --- ADMIN DATA FETCHING ---
   async function fetchData(forceFetch = false) {
     const now = Date.now();
 
-    // CACHE CHECK: Prevent spam if fetched recently (30 seconds for Admin) unless forced
     if (!forceFetch) {
       const lastFetch = sessionStorage.getItem('uba_admin_last_fetch');
       const cachedData = sessionStorage.getItem('uba_admin_cache');
@@ -109,7 +125,6 @@ export default function AdminPage() {
 
   const hasActiveMeeting = useMemo(() => (data.meetings || []).some((m: any) => m.status === 'active'), [data.meetings]);
 
-  // --- SMART CONDITIONAL SYNC ---
   useEffect(() => {
     if (!hasActiveMeeting) return;
     const pollInterval = setInterval(() => {
@@ -231,14 +246,12 @@ export default function AdminPage() {
     } finally { setIsPurging(false); fetchData(true); }
   };
 
-  // --- REWRITTEN CSV EXPORT (NO TIMESTAMPS, CLEAN COLUMNS) ---
   const downloadMeetingCSV = (meetingId: string, meetingTitle: string) => {
     const attendees = data.attendance.filter((a: any) => a.meetingId === meetingId);
     if (attendees.length === 0) return showToast("No data to export.");
     
     let csv = "S.NO,Name,VTU,Gender,Dept,Year,Phone,Status\n";
     attendees.forEach((at: any, index: number) => {
-      // Cross-reference with Master DB to get 100% accurate data
       const u = data.users.find((u: any) => String(u.vtuNumber) === String(at.vtuNumber)) || {};
       const name = at.studentName || u.name || 'Unknown';
       csv += `${index + 1},"${name}",${at.vtuNumber},${u.gender||'N/A'},${u.dept||'N/A'},${u.year||'N/A'},${u.phone||'N/A'},${at.isOverride ? 'MANUAL' : 'VERIFIED'}\n`;
@@ -250,7 +263,6 @@ export default function AdminPage() {
     link.click();
   };
 
-  // --- REWRITTEN ANALYTICS MATH (ACCURATE MASTER ROSTER BINDING) ---
   const getMeetingStats = (attendeesList: any[]) => {
     return attendeesList.reduce((acc: any, curr: any) => {
       const user = data.users.find((u: any) => String(u.vtuNumber) === String(curr.vtuNumber));
@@ -282,7 +294,6 @@ export default function AdminPage() {
     return searchMatch && (filterMonth === 'All' || filterMonth === mMonth);
   });
 
-  // Display only last 2 events until "Load More" is clicked
   const displayedMeetings = showAllMeetings ? filteredMeetings : filteredMeetings.slice(0, 2);
 
   const cleanLookup = vtuLookup.trim().toUpperCase();
@@ -332,7 +343,7 @@ export default function AdminPage() {
           </div>
         )}
 
-        {/* MOBILE-FRIENDLY NAVBAR */}
+        {/* NAVBAR */}
         <nav className="bg-white border-b-2 border-[#FF5722] p-4 md:p-6 sticky top-0 shadow-sm z-40 relative">
           <div className="max-w-7xl mx-auto flex justify-between items-center">
             <div className="flex items-center gap-3">
@@ -340,20 +351,17 @@ export default function AdminPage() {
               <h1 className="font-black uppercase tracking-tighter italic text-sm md:text-xl text-gray-900">Admin Console</h1>
             </div>
             
-            {/* Desktop Menu */}
             <div className="hidden md:flex items-center gap-4">
               <button onClick={() => fetchData(true)} className="text-xs font-black px-4 py-2 rounded-xl border-2 border-gray-100 hover:bg-gray-50 transition uppercase tracking-widest text-gray-600">Refresh Data</button>
               <button onClick={() => signOut(auth)} className="text-xs font-black px-4 py-2 rounded-xl bg-gray-900 text-white hover:bg-black transition tracking-widest uppercase">Logout</button>
             </div>
 
-            {/* Mobile Hamburger Button */}
             <button onClick={() => setIsMenuOpen(!isMenuOpen)} className="md:hidden p-2 bg-[#FFF9F5] rounded-xl border border-[#FF5722]/20">
                <div className={`w-5 h-0.5 bg-[#FF5722] mb-1.5 transition-all ${isMenuOpen ? 'rotate-45 translate-y-2' : ''}`}></div>
                <div className={`w-5 h-0.5 bg-[#FF5722] transition-all ${isMenuOpen ? '-rotate-45 -translate-y-0.5' : ''}`}></div>
             </button>
           </div>
 
-          {/* Mobile Dropdown */}
           {isMenuOpen && (
             <div className="absolute top-full left-0 w-full bg-white border-b-2 border-[#FF5722] p-6 space-y-4 md:hidden animate-in slide-in-from-top-4 shadow-2xl">
                <button onClick={() => { fetchData(true); setIsMenuOpen(false); }} className="w-full py-4 bg-gray-50 text-gray-700 font-black rounded-2xl uppercase text-xs tracking-widest border border-gray-200">Force Refresh</button>
@@ -378,7 +386,7 @@ export default function AdminPage() {
             <div className="p-6 rounded-3xl shadow-sm text-center border-b-4 border-red-500 bg-red-50"><p className="text-[10px] font-black uppercase text-red-400 mb-1 tracking-widest italic">Security Flags</p><p className="text-4xl font-black text-red-600 animate-pulse">{data.suspiciousLogs.length}</p></div>
           </div>
 
-          {/* EVENTS COLUMN (Left on desktop, Top on mobile) */}
+          {/* EVENTS COLUMN */}
           <div className="order-1 lg:col-span-8 space-y-6">
             <div className="p-4 rounded-2xl border border-[#FF5722]/30 flex flex-col md:flex-row gap-4 bg-[#FFF9F5] shadow-sm">
                <input type="text" placeholder="🔍 Search event or coordinator..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="flex-1 p-4 rounded-xl outline-none font-black text-sm border border-gray-100 bg-white shadow-inner" />
@@ -404,8 +412,10 @@ export default function AdminPage() {
               const tabManual = attendees.filter((a: any) => a.isOverride);
               const tabMissing = manifest.filter((man: any) => !attendees.some((att: any) => String(att.vtuNumber) === String(man.vtu)));
               
-              const dateStr = getSafeTime(m.createdAt) ? new Date(getSafeTime(m.createdAt)).toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'}) : 'Recent';
-              const isVerifiable = m.type === 'verifiable';
+              // IST-FIXED SESSION DATE
+              const dateStr = getSafeTime(m.createdAt) 
+                ? new Date(getSafeTime(m.createdAt)).toLocaleString('en-IN', IST_FULL_OPTIONS) 
+                : 'Recent';
 
               return (
                 <div key={m.id} className="p-6 md:p-8 rounded-[3rem] border border-[#FF5722] bg-white shadow-lg relative transition-all group hover:border-[#FF5722]">
@@ -447,8 +457,9 @@ export default function AdminPage() {
                       <div className="p-6 rounded-[2.5rem] border border-gray-200 bg-white flex items-end justify-between h-48 px-4 md:px-10 gap-2 shadow-sm">
                         {[1, 2, 3, 4].map(y => {
                           const yData = stats.years[y.toString()] || { Male: 0, Female: 0, total: 0 };
-                          const max = Math.max(...[1,2,3,4].map(yr => (stats.years[yr.toString()]?.total || 0)));
-                          const height = max > 0 ? (yData.total / max) * 100 : 0;
+                          const maxArr = [1,2,3,4].map(yr => (stats.years[yr.toString()]?.total || 0));
+                          const max = Math.max(...maxArr, 1);
+                          const height = (yData.total / max) * 100;
                           return (
                             <div key={y} className="flex-1 flex flex-col items-center gap-2 h-full justify-end group">
                                <div className="w-8 md:w-16 bg-gray-50 rounded-t-xl overflow-hidden shadow-inner flex flex-col-reverse transition-all duration-500 border border-gray-100" style={{ height: `${Math.max(height, 5)}%` }}>
@@ -465,7 +476,7 @@ export default function AdminPage() {
                       <div className="border-t-2 border-dashed border-gray-200 pt-6">
                         <div className="flex overflow-x-auto border-b border-gray-200 mb-4 shrink-0 no-scrollbar gap-2 pb-2">
                           <button onClick={() => setTab('verified')} className={`flex-1 py-3 px-4 font-black text-[9px] uppercase tracking-widest transition-all whitespace-nowrap rounded-xl ${activeTab === 'verified' ? 'text-white bg-[#111827] shadow-md' : 'text-gray-500 bg-gray-100 hover:bg-gray-200'}`}>Verified ({tabVerified.length})</button>
-                          {isVerifiable && <button onClick={() => setTab('missing')} className={`flex-1 py-3 px-4 font-black text-[9px] uppercase tracking-widest transition-all whitespace-nowrap rounded-xl ${activeTab === 'missing' ? 'text-white bg-red-500 shadow-md' : 'text-red-500 bg-red-50 hover:bg-red-100'}`}>Abandoned ({tabMissing.length})</button>}
+                          {m.type === 'verifiable' && <button onClick={() => setTab('missing')} className={`flex-1 py-3 px-4 font-black text-[9px] uppercase tracking-widest transition-all whitespace-nowrap rounded-xl ${activeTab === 'missing' ? 'text-white bg-red-500 shadow-md' : 'text-red-500 bg-red-50 hover:bg-red-100'}`}>Abandoned ({tabMissing.length})</button>}
                           <button onClick={() => setTab('manual')} className={`flex-1 py-3 px-4 font-black text-[9px] uppercase tracking-widest transition-all whitespace-nowrap rounded-xl ${activeTab === 'manual' ? 'text-gray-900 border-2 border-gray-900 bg-white' : 'text-gray-500 bg-gray-100 hover:bg-gray-200'}`}>Manual ({tabManual.length})</button>
                           <button onClick={() => setTab('suspicious')} className={`flex-1 py-3 px-4 font-black text-[9px] uppercase tracking-widest transition-all whitespace-nowrap rounded-xl ${activeTab === 'suspicious' ? 'text-purple-700 bg-purple-200 shadow-md' : 'text-purple-500 bg-purple-50 hover:bg-purple-100'}`}>Suspicious ({suspicious.length})</button>
                         </div>
@@ -474,7 +485,10 @@ export default function AdminPage() {
                           {activeTab === 'verified' && tabVerified.map((at:any, i:number) => (
                              <div key={i} onClick={() => setSelectedStudent({...at, userData: data.users.find((u:any)=>String(u.vtuNumber) === String(at.vtuNumber))})} className="p-4 rounded-2xl border border-gray-200 bg-white flex justify-between items-center shadow-sm hover:border-[#FF5722] hover:shadow-md transition-all cursor-pointer">
                                <div><p className="font-bold text-sm text-gray-900 capitalize truncate w-40">{at.studentName}</p><p className="text-[10px] font-mono font-black text-[#FF5722] mt-0.5">{at.vtuNumber}</p></div>
-                               <span className="text-[9px] font-black text-gray-400 tabular-nums bg-gray-50 px-2 py-1 rounded-lg border border-gray-100">{at.dateString?.split(',')[1] || 'Done'}</span>
+                               {/* IST-FIXED SCAN TIME */}
+                               <span className="text-[9px] font-black text-gray-400 tabular-nums bg-gray-50 px-2 py-1 rounded-lg border border-gray-100">
+                                 {at.timestamp ? new Date(getSafeTime(at.timestamp)).toLocaleString('en-IN', IST_OPTIONS) : 'Done'}
+                               </span>
                              </div>
                           ))}
 
@@ -527,7 +541,10 @@ export default function AdminPage() {
                              <p className="text-[10px] font-mono font-black text-gray-400 group-hover:text-gray-900 transition-colors mt-0.5">{at.vtuNumber}</p>
                            </div>
                            <div className="text-right">
-                             <span className="text-[9px] font-black text-gray-300 group-hover:text-[#FF5722] transition-colors tabular-nums bg-white px-2 py-1 rounded-lg border border-gray-100">{at.dateString?.split(',')[1] || 'Logged'}</span>
+                             {/* IST-FIXED SCAN TIME */}
+                             <span className="text-[9px] font-black text-gray-300 group-hover:text-[#FF5722] transition-colors tabular-nums bg-white px-2 py-1 rounded-lg border border-gray-100">
+                               {at.timestamp ? new Date(getSafeTime(at.timestamp)).toLocaleString('en-IN', IST_OPTIONS) : 'Logged'}
+                             </span>
                              {at.isOverride && <span className="block text-[7px] text-red-500 font-black uppercase tracking-[0.2em] mt-1">Manual</span>}
                            </div>
                         </div>
@@ -549,7 +566,7 @@ export default function AdminPage() {
             )}
           </div>
 
-          {/* TOOLS COLUMN (Right on desktop, Bottom on mobile) */}
+          {/* TOOLS COLUMN */}
           <div className="order-2 lg:col-span-4 space-y-6">
             
             {/* ASSIGN COORDINATOR */}
@@ -587,14 +604,9 @@ export default function AdminPage() {
                   </div>
                 </div>
               )}
-              {vtuLookup && !searchedUser && (
-                <div className="p-6 rounded-3xl border-2 border-dashed border-orange-200 text-center bg-white opacity-60">
-                   <p className="text-[10px] font-black text-[#FF5722] uppercase tracking-widest">No matching record found</p>
-                </div>
-              )}
             </div>
 
-            {/* MASTER DATABASE UPLOAD */}
+            {/* ROSTER MANAGEMENT */}
             <div className="p-6 md:p-8 rounded-[2.5rem] border-2 border-gray-100 bg-white shadow-sm hover:border-gray-200 transition-colors">
               <h2 className="font-black mb-6 uppercase text-[10px] tracking-[0.2em] text-gray-400 flex items-center gap-2"><span className="text-lg">🗄️</span> Roster Management</h2>
               

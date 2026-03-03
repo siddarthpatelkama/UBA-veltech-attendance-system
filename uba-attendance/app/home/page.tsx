@@ -455,7 +455,14 @@ export default function HomePage() {
                   <div key={i} onClick={() => setSelectedHistoryItem(h)} className="p-8 bg-white border border-gray-100 rounded-[2.5rem] shadow-sm hover:border-[#FF5722] hover:shadow-lg transition-all cursor-pointer group">
                      <div className="flex justify-between mb-4">
                         <span className={`text-[8px] font-black px-2 py-1 rounded ${h.isOverride ? 'bg-yellow-50 text-yellow-600' : 'bg-green-50 text-green-600'}`}>{h.isOverride ? 'MANUAL' : 'VERIFIED'}</span>
-                        <p className="text-[10px] font-mono text-gray-300">{h.dateString || 'N/A'}</p>
+                        <p className="text-[10px] font-mono text-gray-300">
+                          {new Date(h.timestamp).toLocaleString('en-IN', {
+                            timeZone: 'Asia/Kolkata',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            hour12: true
+                          })}
+                        </p>
                      </div>
                      <h3 className="text-xl font-black uppercase italic tracking-tighter group-hover:text-[#FF5722] transition-colors">{h.meetingTitle || 'Field Session'}</h3>
                      <p className="text-[10px] font-bold text-gray-400 mt-1 uppercase">Coord: {h.coordinatorName || 'Unknown'}</p>

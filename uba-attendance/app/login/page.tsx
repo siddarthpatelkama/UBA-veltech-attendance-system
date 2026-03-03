@@ -3,61 +3,63 @@
 import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { auth } from "../../lib/firebase";
-import { signInWithPopup, GoogleAuthProvider, User, onAuthStateChanged } from "firebase/auth";
+import { signInWithPopup, GoogleAuthProvider, signInWithCredential, User, onAuthStateChanged } from "firebase/auth";
+import { Capacitor } from '@capacitor/core';
+import { GoogleAuth } from '@codetrix-studio/capacitor-google-auth';
 
 export default function LoginPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [isSigningIn, setIsSigningIn] = useState(false);
-  
-  // THE FIX: This lock prevents the double-fetching race condition
   const isRouting = useRef(false); 
 
   const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://uba-veltech-attendance-backend-system.onrender.com";
 
-  // --- ROLE-BASED ROUTING ENGINE ---
+  // INJECT NATIVE GOOGLE AUTH ONLY ON MOBILE
+  useEffect(() => {
+    if (Capacitor.isNativePlatform()) {
+      GoogleAuth.initialize({
+        clientId: '414761819857-lvb617pu2mc69r7rao6tns4emii3oeh0.apps.googleusercontent.com',
+        scopes: ['profile', 'email'],
+        grantOfflineAccess: true,
+      });
+    }
+  }, []);
+
   const routeUserByRole = async (user: User) => {
-    if (isRouting.current) return; // If already routing, ignore duplicate calls
+    if (isRouting.current) return;
     isRouting.current = true;
 
     try {
       const token = await user.getIdToken();
-      
       const res = await fetch(`${API_URL}/whoami`, {
         headers: { Authorization: `Bearer ${token}` },
       });
 
       if (!res.ok) {
-        // If the backend returns 403, it means the VTU is not in the Master Roster
-        if (res.status === 403) {
-          throw new Error("NOT_IN_ROSTER");
-        }
+        if (res.status === 403) throw new Error("NOT_IN_ROSTER");
         throw new Error("AUTH_FAILED");
       }
 
       const data = await res.json();
 
-      // Redirect based on the renamed roles
-      if (data.role === "head") {
+      if (data.role === "head" || data.role === "admin") {
         router.replace("/admin");
-      } else if (data.role === "coordinator") {
+      } else if (data.role === "coordinator" || data.role === "student_coordinator") {
         router.replace("/coordinator");
       } else {
         router.replace("/home");
       }
     } catch (err: any) {
       console.error("Routing error:", err);
-      isRouting.current = false; // Reset lock on failure
-
+      isRouting.current = false;
       if (err.message === "NOT_IN_ROSTER") {
-        setError("Access Denied: Your VTU is not registered in the UBA Master Roster.");
-        await auth.signOut(); // Only force sign out if they are explicitly banned
+        setError("Access Denied: Your VTU is not registered in the Master Roster.");
+        await auth.signOut();
       } else {
-        setError("Network connection failed. Are you on the same Wi-Fi as the server?");
-        // THE FIX: Removed auth.signOut() here so they don't get kicked in a loop!
+        setError("Network connection failed. Please check your Wi-Fi.");
       }
-      
       setIsSigningIn(false);
       setLoading(false);
     }
@@ -66,16 +68,11 @@ export default function LoginPage() {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
-        if (!isSigningIn) {
-             await routeUserByRole(user);
-        }
+        if (!isSigningIn) await routeUserByRole(user);
       } else {
         setLoading(false);
       }
     });
-
-    // Removed getRedirectResult entirely to fix the Android crash!
-
     return () => unsubscribe();
   }, [router, API_URL]);
 
@@ -86,13 +83,24 @@ export default function LoginPage() {
       setError("");
       setLoading(true); 
 
-      const provider = new GoogleAuthProvider();
-      provider.setCustomParameters({ prompt: "select_account" });
-      const result = await signInWithPopup(auth, provider);
+      let resultUser: User;
 
-      const userEmail = result.user.email || "";
+      // THE "SMART" SWITCH
+      if (Capacitor.isNativePlatform()) {
+        // 1. App uses Native Android Login to bypass WebView Crash
+        const googleUser = await GoogleAuth.signIn();
+        const credential = GoogleAuthProvider.credential(googleUser.authentication.idToken);
+        const result = await signInWithCredential(auth, credential);
+        resultUser = result.user;
+      } else {
+        // 2. Vercel Website uses standard popup
+        const provider = new GoogleAuthProvider();
+        provider.setCustomParameters({ prompt: "select_account" });
+        const result = await signInWithPopup(auth, provider);
+        resultUser = result.user;
+      }
 
-      // 1. HARD DOMAIN CHECK
+      const userEmail = resultUser.email || "";
       if (!userEmail.endsWith("@veltech.edu.in")) {
         await auth.signOut();
         setError("Access Denied: Use your @veltech.edu.in institutional email.");
@@ -101,12 +109,11 @@ export default function LoginPage() {
         return;
       }
 
-      // 2. BACKEND ROSTER CHECK
-      await routeUserByRole(result.user);
+      await routeUserByRole(resultUser);
 
     } catch (err) {
-      console.error("Popup Error:", err);
-      setError("Login failed. Check your connection or popup blocker.");
+      console.error("Login Error:", err);
+      setError("Login failed. Check your connection.");
       setIsSigningIn(false);
       setLoading(false);
     }
@@ -126,16 +133,10 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen flex flex-col justify-center items-center bg-white p-4 font-sans">
       <div className="w-full max-w-sm">
-        
-        {/* LOGO SECTION */}
         <div className="flex flex-col items-center mb-12">
           <div className="relative mb-6">
             <div className="absolute -inset-4 bg-orange-100/50 rounded-full blur-2xl animate-pulse"></div>
-            <img 
-              src="/uba-logo.png" 
-              alt="UBA Logo" 
-              className="h-28 w-28 relative object-contain rounded-full border-4 border-white shadow-xl"
-            />
+            <img src="/uba-logo.png" alt="UBA Logo" className="h-28 w-28 relative object-contain rounded-full border-4 border-white shadow-xl" />
           </div>
           <h1 className="text-4xl font-black italic tracking-tighter text-gray-900 uppercase">
             Attendance<span className="text-[#FF5722]">.</span>
@@ -145,7 +146,6 @@ export default function LoginPage() {
           </p>
         </div>
 
-        {/* LOGIN CARD */}
         <div className="bg-white rounded-[2.5rem] p-8 border border-gray-100 shadow-2xl shadow-orange-100/50">
           <h2 className="text-center font-black text-xs uppercase tracking-widest text-gray-500 mb-8 underline decoration-[#FF5722] decoration-2 underline-offset-8">
             Identity Verification
@@ -157,11 +157,7 @@ export default function LoginPage() {
             </div>
           )}
 
-          <button 
-            onClick={handleLogin} 
-            disabled={isSigningIn} 
-            className="w-full group relative flex items-center justify-center gap-3 bg-[#111827] hover:bg-black py-5 rounded-2xl transition-all active:scale-95 disabled:opacity-50"
-          >
+          <button onClick={handleLogin} disabled={isSigningIn} className="w-full group relative flex items-center justify-center gap-3 bg-[#111827] hover:bg-black py-5 rounded-2xl transition-all active:scale-95 disabled:opacity-50">
             <img src="https://www.google.com/favicon.ico" className="w-5 h-5 group-hover:scale-110 transition-transform" alt="G" />
             <span className="text-white font-black text-xs uppercase tracking-widest">
               {isSigningIn ? "Authorizing..." : "Sign In with Google"}
@@ -174,7 +170,6 @@ export default function LoginPage() {
           </p>
         </div>
 
-        {/* EXTERNAL LINKS */}
         <div className="mt-12 flex justify-center gap-6 opacity-40 hover:opacity-100 transition-opacity">
            <div className="h-1 w-1 bg-gray-300 rounded-full"></div>
            <div className="h-1 w-1 bg-gray-300 rounded-full"></div>

@@ -918,7 +918,14 @@ export default function CoordinatorPage() {
                               {tabVerified.map((at, i) => (
                                  <div key={i} onClick={() => setSelectedStudent({studentName: at.studentName, vtuNumber: at.vtuNumber})} className="p-4 rounded-2xl border border-gray-100 bg-[#FFF9F5]/30 flex justify-between items-center shadow-sm cursor-pointer hover:border-[#FF5722] transition-colors">
                                    <div><p className="font-bold text-sm text-gray-900">{at.studentName}</p><p className="text-[10px] font-mono font-bold text-[#FF5722]">{at.vtuNumber}</p></div>
-                                   <span className="text-[9px] font-black text-gray-400">{at.dateString?.split(',')[1]}</span>
+                                   <span className="text-[9px] font-black text-gray-400">
+                                     {new Date(at.timestamp).toLocaleString('en-IN', {
+                                       timeZone: 'Asia/Kolkata',
+                                       hour: '2-digit',
+                                       minute: '2-digit',
+                                       hour12: true
+                                     })}
+                                   </span>
                                  </div>
                               ))}
                               {tabVerified.length === 0 && <p className="text-gray-300 text-xs font-black uppercase text-center w-full py-10">No verified scans</p>}
