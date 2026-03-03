@@ -58,6 +58,7 @@ export default function AdminPage() {
   const [isUploading, setIsUploading] = useState(false);
   const [isPurging, setIsPurging] = useState(false);
   const [selectedPurgeYear, setSelectedPurgeYear] = useState('1');
+  const [isProcessing, setIsProcessing] = useState(false);
 
   const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://uba-veltech-attendance-backend-system.onrender.com";
 
@@ -138,7 +139,9 @@ export default function AdminPage() {
   const showToast = (msg: string) => { setToastMsg(msg); setTimeout(() => setToastMsg(null), 3000); };
 
   const handleAddCoordinator = async () => {
+    if (isProcessing) return;
     if (!coordinatorEmail.includes('@')) return showToast("Enter a valid email address");
+    setIsProcessing(true);
     const t = await auth.currentUser?.getIdToken();
     const res = await fetch(`${API_URL}/admin/add-coordinator`, { 
       method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${t}` }, 
@@ -146,6 +149,7 @@ export default function AdminPage() {
     });
     if (res.ok) { setCoordinatorEmail(''); fetchData(true); showToast("Student Coordinator added!"); }
     else { showToast("Failed to add coordinator"); }
+    setTimeout(() => setIsProcessing(false), 30000);
   };
 
   const handleRemoveCoordinator = async (email: string) => {
@@ -411,11 +415,6 @@ export default function AdminPage() {
               const tabVerified = attendees.filter((a: any) => !a.isOverride);
               const tabManual = attendees.filter((a: any) => a.isOverride);
               const tabMissing = manifest.filter((man: any) => !attendees.some((att: any) => String(att.vtuNumber) === String(man.vtu)));
-              
-              // IST-FIXED SESSION DATE
-              const dateStr = getSafeTime(m.createdAt) 
-                ? new Date(getSafeTime(m.createdAt)).toLocaleString('en-IN', IST_FULL_OPTIONS) 
-                : 'Recent';
 
               return (
                 <div key={m.id} className="p-6 md:p-8 rounded-[3rem] border border-[#FF5722] bg-white shadow-lg relative transition-all group hover:border-[#FF5722]">
@@ -425,7 +424,7 @@ export default function AdminPage() {
                          <h3 className="font-black text-2xl uppercase italic tracking-tighter text-gray-900">{m.title}</h3>
                          {m.status === 'active' && <span className="bg-[#FF5722] text-white text-[8px] font-black px-2 py-0.5 rounded animate-pulse uppercase tracking-widest">Live Now</span>}
                        </div>
-                       <p className="text-[10px] font-bold text-gray-400 mt-1 uppercase tracking-widest">Host: {m.createdByName || m.coordinatorId} • {dateStr}</p>
+                       <p className="text-[10px] font-bold text-gray-400 mt-1 uppercase tracking-widest">Host: {m.createdByName || m.coordinatorId}</p>
                      </div>
                      <div className="flex flex-wrap gap-2 w-full lg:w-auto">
                        <button onClick={() => setAnalyticsViewMap({...analyticsViewMap, [m.id]: !isAnalytics})} className={`flex-1 lg:flex-none px-4 py-3 rounded-xl text-[9px] font-black border transition uppercase shadow-sm tracking-widest ${isAnalytics ? 'bg-gray-900 text-white' : 'text-[#FF5722] border-[#FF5722] bg-[#FFF9F5]'}`}>{isAnalytics ? 'Close Analytics' : 'Analytics'}</button>
@@ -485,10 +484,6 @@ export default function AdminPage() {
                           {activeTab === 'verified' && tabVerified.map((at:any, i:number) => (
                              <div key={i} onClick={() => setSelectedStudent({...at, userData: data.users.find((u:any)=>String(u.vtuNumber) === String(at.vtuNumber))})} className="p-4 rounded-2xl border border-gray-200 bg-white flex justify-between items-center shadow-sm hover:border-[#FF5722] hover:shadow-md transition-all cursor-pointer">
                                <div><p className="font-bold text-sm text-gray-900 capitalize truncate w-40">{at.studentName}</p><p className="text-[10px] font-mono font-black text-[#FF5722] mt-0.5">{at.vtuNumber}</p></div>
-                               {/* IST-FIXED SCAN TIME */}
-                               <span className="text-[9px] font-black text-gray-400 tabular-nums bg-gray-50 px-2 py-1 rounded-lg border border-gray-100">
-                                 {at.timestamp ? new Date(getSafeTime(at.timestamp)).toLocaleString('en-IN', IST_OPTIONS) : 'Done'}
-                               </span>
                              </div>
                           ))}
 
@@ -540,13 +535,7 @@ export default function AdminPage() {
                              <p className="font-bold text-sm text-gray-900 truncate w-32 capitalize group-hover:text-[#FF5722] transition-colors">{at.studentName}</p>
                              <p className="text-[10px] font-mono font-black text-gray-400 group-hover:text-gray-900 transition-colors mt-0.5">{at.vtuNumber}</p>
                            </div>
-                           <div className="text-right">
-                             {/* IST-FIXED SCAN TIME */}
-                             <span className="text-[9px] font-black text-gray-300 group-hover:text-[#FF5722] transition-colors tabular-nums bg-white px-2 py-1 rounded-lg border border-gray-100">
-                               {at.timestamp ? new Date(getSafeTime(at.timestamp)).toLocaleString('en-IN', IST_OPTIONS) : 'Logged'}
-                             </span>
-                             {at.isOverride && <span className="block text-[7px] text-red-500 font-black uppercase tracking-[0.2em] mt-1">Manual</span>}
-                           </div>
+                           {at.isOverride && <span className="block text-[7px] text-red-500 font-black uppercase tracking-[0.2em] mt-1">Manual</span>}
                         </div>
                       ))}
                       {attendees.length === 0 && (
@@ -573,7 +562,7 @@ export default function AdminPage() {
             <div className="p-6 md:p-8 rounded-[2.5rem] border-2 border-gray-100 bg-white shadow-sm hover:border-gray-200 transition-colors">
               <h2 className="font-black mb-6 uppercase text-[10px] tracking-[0.2em] text-gray-400 flex items-center gap-2"><span className="text-lg">👑</span> Add Coordinator</h2>
               <input type="email" value={coordinatorEmail} onChange={(e) => setCoordinatorEmail(e.target.value)} placeholder="Student Email..." className="w-full p-4 border border-gray-100 rounded-2xl mb-4 outline-none font-bold text-sm bg-gray-50 focus:bg-white focus:border-[#FF5722] transition-all" />
-              <button onClick={handleAddCoordinator} className="w-full bg-[#111827] text-white font-black py-4 rounded-2xl uppercase text-[10px] tracking-widest shadow-lg hover:bg-black transition-colors">Approve Access</button>
+              <button onClick={handleAddCoordinator} disabled={isProcessing} className="w-full bg-[#111827] text-white font-black py-4 rounded-2xl uppercase text-[10px] tracking-widest shadow-lg hover:bg-black transition-colors disabled:opacity-50 disabled:cursor-not-allowed">{isProcessing ? 'Processing...' : 'Approve Access'}</button>
 
               {coordinators.length > 0 && (
                 <div className="mt-8 pt-6 border-t-2 border-dashed border-gray-100">
@@ -595,7 +584,7 @@ export default function AdminPage() {
               <h2 className="font-black text-[10px] tracking-[0.2em] uppercase mb-4 text-[#FF5722] flex items-center gap-2"><span className="text-lg">🔎</span> Student Tracker</h2>
               <input type="text" placeholder="Search VTU or Name..." value={vtuLookup} onChange={(e) => setVtuLookup(e.target.value)} className="w-full p-4 mb-4 text-sm rounded-2xl outline-none font-black border border-[#FF5722]/30 bg-white shadow-inner focus:border-[#FF5722] transition-colors" />
               {searchedUser && (
-                <div onClick={() => setSelectedStudent({studentName: searchedUser.name, vtuNumber: searchedUser.vtuNumber, userData: searchedUser})} className="p-6 rounded-3xl border-2 border-white bg-white cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all group">
+                <div onClick={() => setSelectedStudent({studentName: searchedUser.name, vtuNumber: searchedUser.vtuNumber, dept: searchedUser.dept, year: searchedUser.year, gender: searchedUser.gender, userData: searchedUser})} className="p-6 rounded-3xl border-2 border-white bg-white cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all group">
                   <p className="font-black text-xl text-gray-900 group-hover:text-[#FF5722] transition-colors tracking-tight">{searchedUser.name}</p>
                   <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mt-2 bg-gray-50 inline-block px-3 py-1 rounded-lg border border-gray-100">{searchedUser.dept} • Yr {searchedUser.year}</p>
                   <div className="mt-6 pt-4 border-t border-gray-100 flex justify-between items-center">

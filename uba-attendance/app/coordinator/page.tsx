@@ -56,6 +56,7 @@ export default function CoordinatorPage() {
 
   const [isCreating, setIsCreating] = useState(false);
   const [creationStatus, setCreationStatus] = useState('');
+  const [isProcessing, setIsProcessing] = useState(false);
 
   // --- SCAN TO ROSTER STATES ---
   const [isScanningRoster, setIsScanningRoster] = useState(false);
@@ -108,15 +109,15 @@ export default function CoordinatorPage() {
       const res = await fetch(`${API_URL}/meetings`, { headers: { Authorization: `Bearer ${token}` } });
       const data = await res.json();
       if (res.ok) {
-        const now = Date.now();
         const processedMeetings = data.meetings.map((m: any) => {
-          const createdAtTime = getSafeTime(m.createdAt, now);
-          const expiresAt = createdAtTime + 1200000; 
+          const createdAtTime = getSafeTime(m.createdAt, Date.now());
+          const expiresAt = createdAtTime + 1200000; // 20 minutes in milliseconds
           
-          if (m.status === 'active' && now > expiresAt && m.type !== 'verifiable') {
-            return { ...m, status: 'closed', attendanceActive: false, systemClosed: true, calculatedExpiresAt: expiresAt };
+          // FORCE CLOSE if time has passed
+          if (m.status === 'active' && Date.now() > expiresAt) {
+            return { ...m, status: 'closed', attendanceActive: false };
           }
-          return { ...m, calculatedExpiresAt: expiresAt };
+          return { ...m };
         });
 
         processedMeetings.sort((a: any, b: any) => getSafeTime(b.createdAt, 0) - getSafeTime(a.createdAt, 0));
@@ -391,7 +392,9 @@ export default function CoordinatorPage() {
   };
 
   const handlePushScannedRoster = async () => {
+    if (isProcessing) return;
     if (scannedRoster.length === 0) return showToast("No students scanned!");
+    setIsProcessing(true);
     const token = await auth.currentUser?.getIdToken();
     await fetch(`${API_URL}/meeting/update-manifest`, {
       method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -400,10 +403,13 @@ export default function CoordinatorPage() {
     setScannedRoster([]); setIsScanningRoster(false); setShowScanner(false);
     fetchData(false);
     showToast(`${scannedRoster.length} students locked into Master Roster!`);
+    setTimeout(() => setIsProcessing(false), 30000);
   };
 
   const handleManualAdd = async (overridePhaseId?: string) => {
+    if (isProcessing) return;
     if (!manualVtu.trim()) return showToast("Enter VTU Number");
+    setIsProcessing(true);
     const token = await auth.currentUser?.getIdToken();
     const vtuToUse = manualVtu.toUpperCase().replace(/\D/g, '');
     
@@ -427,11 +433,13 @@ export default function CoordinatorPage() {
       if (res.ok) { await fetchData(false); showToast("Manual Override Verified"); }
     }
     setManualVtu('');
+    setTimeout(() => setIsProcessing(false), 30000);
   };
 
   const handleOfflineSync = async () => {
-    if (localOfflineScans.length === 0) return;
+    if (isProcessing || localOfflineScans.length === 0) return;
     setIsSyncing(true);
+    setIsProcessing(true);
     const token = await auth.currentUser?.getIdToken();
     try {
       const res = await fetch(`${API_URL}/meeting/offline-sync`, {
@@ -440,10 +448,10 @@ export default function CoordinatorPage() {
       });
       if (res.ok) {
         setLocalOfflineScans([]); localStorage.removeItem('uba_offline_vault');
-        showToast("Cloud Sync Successful!"); fetchData();
+        showToast("Cloud Sync Successful!"); await fetchData(true);
       } else { showToast("Sync Rejected: Session was not flagged for offline use."); }
     } catch (e) { showToast("Sync Failed. No Internet."); } 
-    finally { setIsSyncing(false); }
+    finally { setIsSyncing(false); setTimeout(() => setIsProcessing(false), 30000); }
   };
 
   useEffect(() => {
@@ -741,10 +749,10 @@ export default function CoordinatorPage() {
                 <h3 className="font-black text-red-600 text-sm uppercase mb-2">Offline Vault Loaded</h3>
                 <p className="text-[10px] font-bold text-red-400 mb-6 uppercase tracking-widest">{localOfflineScans.length} Scans Ready for Cloud Push</p>
                 <button 
-                  onClick={handleOfflineSync} disabled={isOfflineMode || isSyncing}
+                  onClick={handleOfflineSync} disabled={isOfflineMode || isSyncing || isProcessing}
                   className="w-full bg-red-600 text-white py-5 rounded-3xl font-black text-xs uppercase shadow-xl disabled:opacity-50"
                 >
-                  {isSyncing ? 'Pushing...' : 'Sync to Cloud Now'}
+                  {isSyncing ? 'Syncing Vault...' : isProcessing ? 'Cooldown...' : 'Sync to Cloud Now'}
                 </button>
                 {isOfflineMode && <p className="text-[9px] font-black text-center mt-4 text-red-400 uppercase italic">Must Go Online to Sync</p>}
               </div>
@@ -784,20 +792,20 @@ export default function CoordinatorPage() {
 
                       {isScanningRoster && showScanner ? (
                         <div className="bg-white p-6 rounded-2xl border-2 border-[#FF5722] animate-in zoom-in-95">
-                           <div id="reader" className="w-full min-h-[250px] bg-black rounded-xl overflow-hidden mb-4"></div>
+                           <div id="reader" className="w-full min-h-[250px] bg-black rounded-xl overflow-hidden mb-4 relative"><p className="absolute inset-0 flex items-center justify-center text-white text-[10px] font-black uppercase tracking-widest animate-pulse z-10 pointer-events-none">Initializing Camera... Please allow permissions.</p></div>
                            {scannerSuccess && (<div className="w-full bg-green-500 text-white font-black p-3 text-center rounded-xl mb-4 animate-pulse">✅ {scannerSuccess}</div>)}
                            {scannerError && (<div className="w-full bg-red-600 text-white font-black p-3 text-center rounded-xl mb-4 animate-bounce">🚨 {scannerError}</div>)}
                            <div className="flex justify-between items-center mb-4 px-2">
                              <p className="font-black text-gray-400 uppercase text-xs">Scanned: <span className="text-[#FF5722] text-lg">{scannedRoster.length}</span></p>
                              <button onClick={() => { setIsScanningRoster(false); setShowScanner(false); setScannedRoster([]); }} className="text-[10px] font-black text-red-500 uppercase">Cancel</button>
                            </div>
-                           <button onClick={handlePushScannedRoster} className="w-full bg-[#FF5722] text-white font-black py-4 rounded-xl uppercase text-xs shadow-xl tracking-widest">Push to Master Roster</button>
+                           <button onClick={handlePushScannedRoster} disabled={isProcessing} className="w-full bg-[#FF5722] text-white font-black py-4 rounded-xl uppercase text-xs shadow-xl tracking-widest disabled:opacity-50 disabled:cursor-not-allowed">{isProcessing ? 'Pushing Roster...' : 'Push to Master Roster'}</button>
                         </div>
                       ) : (
                         <div className="flex flex-col md:flex-row gap-3">
                           <div className="flex gap-2 flex-1">
                             <input type="text" value={manualVtu} onChange={(e) => setManualVtu(e.target.value)} placeholder="VTU..." className="flex-1 p-4 border border-gray-100 rounded-2xl font-mono outline-none bg-white font-black text-sm shadow-inner" />
-                            <button onClick={() => handleManualAdd('initial')} className="bg-white border-2 border-gray-200 text-gray-800 px-6 py-3 font-black rounded-xl uppercase text-[10px] tracking-widest hover:border-gray-400 transition-colors">Inject</button>
+                            <button onClick={() => handleManualAdd('initial')} disabled={isProcessing} className="bg-white border-2 border-gray-200 text-gray-800 px-6 py-3 font-black rounded-xl uppercase text-[10px] tracking-widest hover:border-gray-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">{isProcessing ? 'Injecting...' : 'Inject'}</button>
                           </div>
                           <div className="relative overflow-hidden w-full md:w-auto border-2 font-black rounded-xl cursor-pointer transition bg-white border-[#FF5722] text-[#FF5722] hover:bg-orange-50">
                             <div className="px-6 py-4 w-full h-full text-center flex items-center justify-center uppercase text-[10px] tracking-widest">CSV Upload</div>
@@ -830,7 +838,7 @@ export default function CoordinatorPage() {
                             {/* UNIVERSAL CAMERA OVERLAY */}
                             {showScanner ? (
                                <div className="w-full flex flex-col items-center animate-in zoom-in-95 z-20 bg-white p-4 rounded-3xl shadow-2xl absolute top-4 left-4 right-4">
-                                  <div id="reader" className="w-full min-h-[250px] bg-black rounded-2xl overflow-hidden mb-4"></div>
+                                  <div id="reader" className="w-full min-h-[250px] bg-black rounded-2xl overflow-hidden mb-4 relative"><p className="absolute inset-0 flex items-center justify-center text-white text-[10px] font-black uppercase tracking-widest animate-pulse z-10 pointer-events-none">Initializing Camera... Please allow permissions.</p></div>
                                   {scannerSuccess && (<div className="w-full bg-green-500 text-white font-black p-3 text-center rounded-xl mb-4 animate-pulse">✅ {scannerSuccess}</div>)}
                                   {scannerError && (<div className="w-full bg-red-600 text-white font-black p-3 text-center rounded-xl mb-4 animate-bounce">🚨 {scannerError}</div>)}
                                   <button onClick={() => { setShowScanner(false); setScannerError(''); setScannerSuccess(''); }} className="w-full bg-gray-200 text-gray-700 font-black py-3 rounded-xl uppercase text-xs">Close Camera</button>
@@ -865,7 +873,7 @@ export default function CoordinatorPage() {
                                <h3 className="font-black mb-3 uppercase text-[9px] tracking-widest text-gray-400 text-center">Manual Inject</h3>
                                <div className="flex gap-2">
                                  <input type="text" value={manualVtu} onChange={(e)=>setManualVtu(e.target.value.toUpperCase())} placeholder="VTU..." className="flex-1 p-3 text-sm border border-gray-100 rounded-xl outline-none font-mono font-black text-center bg-white shadow-sm" onKeyDown={(e) => { if (e.key === 'Enter') handleManualAdd(); }}/>
-                                 <button onClick={() => handleManualAdd()} className="bg-gray-200 text-gray-800 px-4 rounded-xl font-black text-[10px] uppercase hover:bg-gray-300">Add</button>
+                                 <button onClick={() => handleManualAdd()} disabled={isProcessing} className="bg-gray-200 text-gray-800 px-4 rounded-xl font-black text-[10px] uppercase hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed">{isProcessing ? 'Adding...' : 'Add'}</button>
                                </div>
                             </div>
                           </div>
