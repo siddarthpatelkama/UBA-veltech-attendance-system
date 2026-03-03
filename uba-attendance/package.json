@@ -9,6 +9,9 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@capacitor/android": "^8.1.0",
+    "@capacitor/cli": "^8.1.0",
+    "@capacitor/core": "^8.1.0",
     "axios": "^1.13.5",
     "canvas-confetti": "^1.9.4",
     "crypto-js": "^4.2.0",
@@ -22,6 +25,7 @@
     "react-qr-code": "^2.0.18"
   },
   "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
     "@tailwindcss/postcss": "^4.1.18",
     "@types/canvas-confetti": "^1.9.0",
     "@types/crypto-js": "^4.2.2",

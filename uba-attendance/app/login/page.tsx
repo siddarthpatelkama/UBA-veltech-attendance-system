@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { auth } from "../../lib/firebase";
-import { signInWithPopup, GoogleAuthProvider, getRedirectResult, User, onAuthStateChanged } from "firebase/auth";
+import { signInWithPopup, GoogleAuthProvider, User, onAuthStateChanged } from "firebase/auth";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -74,9 +74,7 @@ export default function LoginPage() {
       }
     });
 
-    getRedirectResult(auth).then(result => {
-        if(result?.user) routeUserByRole(result.user);
-    }).catch(console.error);
+    // Removed getRedirectResult entirely to fix the Android crash!
 
     return () => unsubscribe();
   }, [router, API_URL]);

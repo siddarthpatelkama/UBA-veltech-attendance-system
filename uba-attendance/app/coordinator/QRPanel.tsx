@@ -43,7 +43,8 @@ export default function QRPanel({ meetingId, coordinatorEmail, endTime, phaseId 
       const jsonData = JSON.stringify({ meetingId, coordinatorEmail, timeSlot, token, phaseId: phaseStr });
       const encodedData = btoa(jsonData);
       
-      setQrUrl(`${window.location.origin}/attendance?data=${encodedData}`);
+      const FRONTEND_URL = "https://uba-veltech-attendance-system.vercel.app";
+      setQrUrl(`${FRONTEND_URL}/attendance?data=${encodedData}`);
       setRefreshTimer(11 - Math.floor((now / 1000) % 11));
     }
 

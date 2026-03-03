@@ -70,7 +70,7 @@ export default function CoordinatorPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://uba-veltech-attendance-backend-system.onrender.com";
-  const FRONTEND_URL = process.env.NEXT_PUBLIC_FRONTEND_URL || "http://10.120.248.230:3000"; 
+  const FRONTEND_URL = process.env.NEXT_PUBLIC_FRONTEND_URL || "https://uba-veltech-attendance-system.vercel.app"; 
 
   const fetchMyProfile = async (token: string) => {
     try {
