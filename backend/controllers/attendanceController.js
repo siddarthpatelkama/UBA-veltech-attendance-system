@@ -2,15 +2,25 @@ const admin = require("../firebaseAdmin");
 const db = require("../config/firebase");
 const crypto = require("crypto");
 
+// --- THE FIX: Safe VTU Extractor ---
+// Prevents 500 Server Crashes if an email has no numbers (e.g. siddarthpatelkama@veltech.edu.in)
+const getSafeVtu = (user) => {
+  if (user.vtuNumber) return user.vtuNumber.toString().replace(/\D/g, '');
+  if (user.email) {
+      const numeric = user.email.split('@')[0].replace(/\D/g, '');
+      if (numeric) return numeric;
+      return user.email.split('@')[0].toUpperCase(); // Fallback for pure letter emails
+  }
+  return 'UNKNOWN';
+};
+
 /**
  * MARK ATTENDANCE
- * Fixed: Uses clean numeric VTU for security logs and document IDs
  */
 exports.markAttendance = async (req, res) => {
   try {
     const { qrData, deviceId } = req.body;
-    // CLEANER: Ensure student ID is numeric
-    const studentVtu = req.user.vtuNumber.toString().replace(/\D/g, '');
+    const studentVtu = getSafeVtu(req.user); // FIXED
 
     const decoded = JSON.parse(Buffer.from(qrData, 'base64').toString());
     const { meetingId, coordinatorEmail, timeSlot, token, phaseId } = decoded;
@@ -22,7 +32,6 @@ exports.markAttendance = async (req, res) => {
       return res.status(401).json({ success: false, message: "QR Code Expired. Please scan fresh code." });
     }
 
-    // This checks both possible names AND the hardcoded backup to match the frontend perfectly
     const secret = process.env.QR_SECRET || process.env.SECRET_KEY || 'uba_super_secret_key_123';
     const payloadString = `${meetingId}:${coordinatorEmail}:${timeSlot}${phaseId !== 'none' ? ':' + phaseId : ''}`;
     
@@ -70,7 +79,6 @@ exports.markAttendance = async (req, res) => {
     let studentData = null;
     let isGuest = false;
 
-    // Check Master Roster with Clean Numeric ID
     let masterDoc = await db.collection("master_roster").doc(studentVtu).get();
     
     if (masterDoc.exists) {
@@ -111,13 +119,12 @@ exports.markAttendance = async (req, res) => {
  */
 exports.completeProfile = async (req, res) => {
   try {
-    // FIX: Extract 'name' from req.body sent by the updated frontend
     const { name, dept, year, gender, phone } = req.body;
-    const vtu = req.user.vtuNumber.toString().replace(/\D/g, '');
+    const vtu = getSafeVtu(req.user); // FIXED
 
     const profileData = {
       vtuNumber: vtu,
-      name: name || req.user.name, // Will use their preferred name, fallback to Google name if empty
+      name: name || req.user.name,
       email: req.user.email,
       dept,
       year,
@@ -142,19 +149,14 @@ exports.completeProfile = async (req, res) => {
 exports.getUserProfile = async (req, res) => {
   try {
     const email = req.user.email;
-    const vtuFromToken = req.user.vtuNumber ? req.user.vtuNumber.toString().replace(/\D/g, '') : '';
-    const vtuFromEmail = email.split('@')[0].replace(/\D/g, '');
-    const vtu = vtuFromToken || vtuFromEmail;
+    const vtu = getSafeVtu(req.user); // FIXED
     
-    // 1. Check Master Roster
     let masterDoc = await db.collection("master_roster").doc(vtu).get();
     if (masterDoc.exists) return res.json(masterDoc.data());
 
-    // 2. Check Temporary Roster
     const tempDoc = await db.collection("temporary_roster").doc(vtu).get();
     if (tempDoc.exists) return res.json(tempDoc.data());
 
-    // 3. Fallback to Users Collection
     const userDoc = await db.collection("users").doc(email).get();
     if (userDoc.exists) {
         const uData = userDoc.data();
@@ -173,13 +175,11 @@ exports.getUserProfile = async (req, res) => {
  */
 exports.getStudentHistory = async (req, res) => {
   try {
-    const vtu = req.user.vtuNumber.toString().replace(/\D/g, '');
+    const vtu = getSafeVtu(req.user); // FIXED
     
-    // 1. Get raw attendance logs for this student
     const historySnap = await db.collection("attendance").where("vtuNumber", "==", vtu).get();
     const rawHistory = historySnap.docs.map(doc => doc.data());
 
-    // 2. Fetch corresponding meeting details to get Title and Coordinator Name
     const enrichedHistory = await Promise.all(rawHistory.map(async (record) => {
       let meetingTitle = "Unknown Session";
       let coordinatorName = "Unknown Coordinator";
@@ -200,14 +200,12 @@ exports.getStudentHistory = async (req, res) => {
       };
     }));
 
-    // Sort history newest first
     enrichedHistory.sort((a, b) => {
       const timeA = a.timestamp?.seconds ? a.timestamp.seconds * 1000 : (a.timestamp || 0);
       const timeB = b.timestamp?.seconds ? b.timestamp.seconds * 1000 : (b.timestamp || 0);
       return timeB - timeA;
     });
 
-    // 3. Generate Leaderboard
     const allAttendance = await db.collection("attendance").get();
     const counts = {};
     allAttendance.docs.forEach(doc => {
@@ -222,6 +220,7 @@ exports.getStudentHistory = async (req, res) => {
 
     res.json({ history: enrichedHistory, leaderboard });
   } catch (error) {
+    console.error("History Fetch Error:", error);
     res.status(500).send();
   }
 };
