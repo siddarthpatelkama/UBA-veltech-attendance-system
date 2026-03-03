@@ -111,13 +111,13 @@ export default function CoordinatorPage() {
       if (res.ok) {
         const processedMeetings = data.meetings.map((m: any) => {
           const createdAtTime = getSafeTime(m.createdAt, Date.now());
-          const expiresAt = createdAtTime + 1200000; // 20 minutes in milliseconds
+          const expiresAt = createdAtTime + 1800000; // 30 minutes in milliseconds
           
           // FORCE CLOSE if time has passed
           if (m.status === 'active' && Date.now() > expiresAt) {
             return { ...m, status: 'closed', attendanceActive: false };
           }
-          return { ...m };
+          return { ...m, calculatedExpiresAt: expiresAt };
         });
 
         processedMeetings.sort((a: any, b: any) => getSafeTime(b.createdAt, 0) - getSafeTime(a.createdAt, 0));
@@ -198,7 +198,7 @@ export default function CoordinatorPage() {
     let interval = setInterval(() => {
       const now = Date.now();
       const activePhase = activeMeeting.type === 'verifiable' ? (activeMeeting.phases || []).find((p:any) => p.status === 'active') : null;
-      const endTimeToUse = activePhase ? getSafeTime(activePhase.endTime, now + 1200000) : activeMeeting.calculatedExpiresAt;
+      const endTimeToUse = activePhase ? getSafeTime(activePhase.endTime, now + 1800000) : activeMeeting.calculatedExpiresAt;
 
       if (now > endTimeToUse) {
         setSecondsLeft(0);
@@ -386,7 +386,7 @@ export default function CoordinatorPage() {
         body: JSON.stringify({ meetingId: selectedMeetingId, action: 'add_bulk', students })
       });
       fetchData(false);
-      showToast(`${students.length} students uploaded to Master Roster`);
+      showToast(`${students.length} students appended to Base Roster`);
     };
     reader.readAsText(file);
   };
@@ -778,7 +778,7 @@ export default function CoordinatorPage() {
                 <div className="p-4 md:p-8 flex-grow flex flex-col">
 
                   {/* STEP 1: INITIAL ROSTER UPLOAD WITH CAMERA (Persists across all phases) */}
-                  {isVerifiable && displayMeeting.status === 'active' && manifest.length === 0 && !activePhase && (
+                  {isVerifiable && displayMeeting.status === 'active' && !activePhase && completedPhases.length === 0 && (
                     <div className="border rounded-3xl p-8 mb-8 shadow-sm bg-[#FFF9F5] border-[#FF5722]/30 flex-shrink-0 animate-in fade-in">
                       <div className="flex justify-between items-start mb-6">
                         <div>
@@ -845,9 +845,9 @@ export default function CoordinatorPage() {
                                </div>
                             ) : (
                                <>
-                                {!isOfflineMode && secondsLeft > 0 ? (
+                                {!isOfflineMode && displayMeeting?.status === 'active' ? (
                                   <div className="bg-white p-4 rounded-[2rem] shadow-xl border-4 border-white mb-6">
-                                    {qrUrl ? <QRCode value={qrUrl} size={180} fgColor="#111827" /> : <div className="h-[180px] w-[180px] flex items-center justify-center font-black animate-pulse text-gray-200">WAIT</div>}
+                                    {qrUrl ? <QRCode value={qrUrl} size={180} fgColor="#111827" /> : <div className="h-[180px] w-[180px] flex items-center justify-center font-black animate-pulse text-gray-200">GENERATING...</div>}
                                   </div>
                                 ) : isOfflineMode ? (
                                   <div className="h-[180px] flex flex-col justify-center items-center opacity-50 mb-6">

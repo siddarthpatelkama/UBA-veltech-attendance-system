@@ -251,31 +251,136 @@ export default function AdminPage() {
   };
 
   const downloadMeetingCSV = (meetingId: string, meetingTitle: string) => {
+    const meeting = data.meetings.find((m: any) => m.id === meetingId);
+    if (!meeting) return showToast("Meeting not found.");
+
     const attendees = data.attendance.filter((a: any) => a.meetingId === meetingId);
-    if (attendees.length === 0) return showToast("No data to export.");
-    
-    let csv = "S.NO,Name,VTU,Gender,Dept,Year,Phone,Status\n";
-    attendees.forEach((at: any, index: number) => {
-      const u = data.users.find((u: any) => String(u.vtuNumber) === String(at.vtuNumber)) || {};
-      const name = at.studentName || u.name || 'Unknown';
-      csv += `${index + 1},"${name}",${at.vtuNumber},${u.gender||'N/A'},${u.dept||'N/A'},${u.year||'N/A'},${u.phone||'N/A'},${at.isOverride ? 'MANUAL' : 'VERIFIED'}\n`;
+    const isVerifiable = meeting.type === 'verifiable';
+    const phases = meeting.phases || [];
+    const totalPhases = phases.length;
+    const manifest = meeting.manifest || [];
+
+    // 1. Group Data by VTU
+    const studentStats: Record<string, any> = {};
+
+    // Seed with Base Roster (Manifest)
+    if (isVerifiable) {
+      manifest.forEach((m: any) => {
+        studentStats[String(m.vtu)] = {
+          vtu: String(m.vtu),
+          name: m.name || 'Unknown',
+          isManifest: true,
+          scans: new Set(),
+          isManual: false
+        };
+      });
+    }
+
+    // Process all actual scans
+    attendees.forEach((at: any) => {
+      const vtu = String(at.vtuNumber);
+      if (!studentStats[vtu]) {
+        // Late Joiner (Scanned but not in Base Roster)
+        studentStats[vtu] = {
+          vtu: vtu,
+          name: at.studentName || 'Unknown',
+          isManifest: false, 
+          scans: new Set(),
+          isManual: at.isOverride
+        };
+      } else {
+        if (at.isOverride) studentStats[vtu].isManual = true;
+      }
+      
+      if (at.phaseId && at.phaseId !== 'none') {
+        studentStats[vtu].scans.add(at.phaseId);
+      } else if (!isVerifiable) {
+        studentStats[vtu].scans.add('standard');
+      }
     });
+
+    const exportList = Object.values(studentStats);
+    if (exportList.length === 0) return showToast("No data to export.");
+
+    // 2. Build CSV Headers
+    let csv = "";
+    if (isVerifiable) {
+      csv = "S.NO,Name,VTU,Gender,Dept,Year,Phone,Base Roster,Phases Attended,Missed Checkpoints,OD Status,Manual Override\n";
+    } else {
+      csv = "S.NO,Name,VTU,Gender,Dept,Year,Phone,Status\n";
+    }
+
+    // 3. Sort students (Highest attendance first, then by VTU)
+    if (isVerifiable) {
+      exportList.sort((a, b) => b.scans.size - a.scans.size || a.vtu.localeCompare(b.vtu));
+    } else {
+      exportList.sort((a, b) => a.vtu.localeCompare(b.vtu));
+    }
+
+    // 4. Generate Rows
+    exportList.forEach((stat, index) => {
+      // Master Roster Priority Lookup
+      const u = data.users.find((user: any) => String(user.vtuNumber) === stat.vtu) || {};
+      const finalName = u.name || stat.name || 'Unknown';
+      const gender = u.gender || 'N/A';
+      const dept = u.dept || 'N/A';
+      const year = u.year || 'N/A';
+      const phone = u.phone || 'N/A';
+
+      if (isVerifiable) {
+        const attendedCount = stat.scans.size;
+        const rosterStatus = stat.isManifest ? "Yes" : "LATE JOINER";
+        const overrideStatus = stat.isManual ? "YES" : "NO";
+        
+        // Map missing phases
+        let missedNames: string[] = [];
+        phases.forEach((p: any) => {
+          if (!stat.scans.has(p.id)) missedNames.push(p.title);
+        });
+        const missedString = missedNames.length > 0 ? missedNames.join(" & ") : "None";
+
+        // Calculate OD Status
+        let odStatus = "DENIED";
+        if (totalPhases === 0) {
+            odStatus = "PENDING (NO PHASES)";
+        } else if (attendedCount === totalPhases) {
+          odStatus = "GRANTED";
+        } else if (attendedCount === totalPhases - 1) {
+          odStatus = "REVIEW REQUIRED";
+        }
+
+        csv += `${index + 1},"${finalName}",${stat.vtu},${gender},${dept},${year},${phone},"${rosterStatus}","${attendedCount}/${totalPhases}","${missedString}","${odStatus}","${overrideStatus}"\n`;
+      } else {
+         const status = stat.isManual ? 'MANUAL' : 'VERIFIED';
+         csv += `${index + 1},"${finalName}",${stat.vtu},${gender},${dept},${year},${phone},${status}\n`;
+      }
+    });
+
     const blob = new Blob([csv], { type: 'text/csv' });
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
-    link.download = `${meetingTitle}_Verified_Roster.csv`;
+    link.download = `${meetingTitle.replace(/\s+/g, '_')}_Consolidated_Report.csv`;
     link.click();
   };
 
   const getMeetingStats = (attendeesList: any[]) => {
     return attendeesList.reduce((acc: any, curr: any) => {
+      // Find the user in the Master Roster (data.users)
       const user = data.users.find((u: any) => String(u.vtuNumber) === String(curr.vtuNumber));
-      const gen = String(user?.gender || 'Unknown').toUpperCase();
-      const year = String(user?.year || 'Unknown');
+      
+      // Use Master Roster data if available, otherwise fallback to temporary scan data
+      const gen = String(user?.gender || curr.gender || 'Unknown').toUpperCase();
+      const year = String(user?.year || curr.year || 'Unknown');
       
       if (!acc.years[year]) acc.years[year] = { Male: 0, Female: 0, total: 0 };
-      if (gen.startsWith('M')) { acc.gender['Male'] = (acc.gender['Male'] || 0) + 1; acc.years[year].Male += 1; } 
-      else if (gen.startsWith('F')) { acc.gender['Female'] = (acc.gender['Female'] || 0) + 1; acc.years[year].Female += 1; }
+      if (gen.startsWith('M')) { 
+        acc.gender['Male'] = (acc.gender['Male'] || 0) + 1; 
+        acc.years[year].Male += 1; 
+      } 
+      else if (gen.startsWith('F')) { 
+        acc.gender['Female'] = (acc.gender['Female'] || 0) + 1; 
+        acc.years[year].Female += 1; 
+      }
       acc.years[year].total += 1;
       
       return acc;
@@ -481,25 +586,34 @@ export default function AdminPage() {
                         </div>
 
                         <div className="grid md:grid-cols-2 gap-3 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
-                          {activeTab === 'verified' && tabVerified.map((at:any, i:number) => (
-                             <div key={i} onClick={() => setSelectedStudent({...at, userData: data.users.find((u:any)=>String(u.vtuNumber) === String(at.vtuNumber))})} className="p-4 rounded-2xl border border-gray-200 bg-white flex justify-between items-center shadow-sm hover:border-[#FF5722] hover:shadow-md transition-all cursor-pointer">
+                          {activeTab === 'verified' && tabVerified.map((at:any, i:number) => {
+                           const dbUser = data.users.find((u:any)=>String(u.vtuNumber) === String(at.vtuNumber));
+                           return (
+                             <div key={i} onClick={() => setSelectedStudent({...at, studentName: dbUser?.name || at.studentName || 'Unknown', userData: dbUser || at.userData || {}, dept: dbUser?.dept || at.dept || 'N/A', year: dbUser?.year || at.year || 'N/A', gender: dbUser?.gender || at.gender || 'N/A'})} className="p-4 rounded-2xl border border-gray-200 bg-white flex justify-between items-center shadow-sm hover:border-[#FF5722] hover:shadow-md transition-all cursor-pointer">
                                <div><p className="font-bold text-sm text-gray-900 capitalize truncate w-40">{at.studentName}</p><p className="text-[10px] font-mono font-black text-[#FF5722] mt-0.5">{at.vtuNumber}</p></div>
                              </div>
-                          ))}
+                           );
+                          })}
 
-                          {activeTab === 'missing' && tabMissing.map((m:any, i:number) => (
-                             <div key={i} onClick={() => setSelectedStudent({studentName: m.name, vtuNumber: m.vtu, userData: data.users.find((u:any)=>String(u.vtuNumber) === String(m.vtu))})} className="p-4 rounded-2xl border border-red-200 bg-red-50 flex justify-between items-center shadow-sm hover:bg-red-100 transition-all cursor-pointer">
+                          {activeTab === 'missing' && tabMissing.map((m:any, i:number) => {
+                           const dbUser = data.users.find((u:any)=>String(u.vtuNumber) === String(m.vtu));
+                           return (
+                             <div key={i} onClick={() => setSelectedStudent({studentName: dbUser?.name || m.name || 'Unknown', vtuNumber: m.vtu, userData: dbUser || {}, dept: dbUser?.dept || 'N/A', year: dbUser?.year || 'N/A', gender: dbUser?.gender || 'N/A'})} className="p-4 rounded-2xl border border-red-200 bg-red-50 flex justify-between items-center shadow-sm hover:bg-red-100 transition-all cursor-pointer">
                                <div><p className="font-bold text-sm text-red-900 capitalize truncate w-40">{m.name}</p><p className="text-[10px] font-mono font-black text-red-500 mt-0.5">{m.vtu}</p></div>
                                <span className="text-[8px] px-2 py-1 bg-red-600 text-white font-black rounded uppercase tracking-widest shadow-sm">Missing</span>
                              </div>
-                          ))}
+                           );
+                          })}
 
-                          {activeTab === 'manual' && tabManual.map((at:any, i:number) => (
-                             <div key={i} onClick={() => setSelectedStudent({...at, userData: data.users.find((u:any)=>String(u.vtuNumber) === String(at.vtuNumber))})} className="p-4 rounded-2xl border-2 border-dashed border-gray-300 bg-white flex justify-between items-center cursor-pointer hover:border-gray-500 transition-colors">
+                          {activeTab === 'manual' && tabManual.map((at:any, i:number) => {
+                           const dbUser = data.users.find((u:any)=>String(u.vtuNumber) === String(at.vtuNumber));
+                           return (
+                             <div key={i} onClick={() => setSelectedStudent({...at, studentName: dbUser?.name || at.studentName || 'Unknown', userData: dbUser || at.userData || {}, dept: dbUser?.dept || at.dept || 'N/A', year: dbUser?.year || at.year || 'N/A', gender: dbUser?.gender || at.gender || 'N/A'})} className="p-4 rounded-2xl border-2 border-dashed border-gray-300 bg-white flex justify-between items-center cursor-pointer hover:border-gray-500 transition-colors">
                                <div><p className="font-bold text-sm text-gray-900 capitalize truncate w-32">{at.studentName}</p><p className="text-[10px] font-mono font-black text-gray-500 mt-0.5">{at.vtuNumber}</p></div>
                                <div className="text-right"><p className="text-[8px] bg-gray-900 text-white px-2 py-1 rounded font-black uppercase tracking-widest mb-1 inline-block">Manual</p><p className="text-[8px] font-bold text-gray-400 italic block truncate w-20">By {at.enteredBy?.split('@')[0]}</p></div>
                              </div>
-                          ))}
+                           );
+                          })}
 
                           {activeTab === 'suspicious' && suspicious.map((log: any, i: number) => (
                             <div key={i} className="p-4 bg-purple-50 border border-purple-300 rounded-2xl flex justify-between items-center col-span-1 md:col-span-2 shadow-sm">
@@ -529,15 +643,18 @@ export default function AdminPage() {
 
                   {!isAnalytics && (
                     <div className="grid md:grid-cols-2 gap-3 max-h-[250px] overflow-y-auto pr-2 custom-scrollbar">
-                      {attendees.map((at:any, i:number) => (
-                        <div key={i} onClick={() => setSelectedStudent({...at, userData: data.users.find((u:any)=>String(u.vtuNumber) === String(at.vtuNumber))})} className="p-4 rounded-2xl border border-gray-100 bg-[#FFF9F5]/40 flex justify-between items-center hover:bg-white hover:border-[#FF5722] hover:shadow-md cursor-pointer transition-all group">
+                      {attendees.map((at:any, i:number) => {
+                        const dbUser = data.users.find((u:any)=>String(u.vtuNumber) === String(at.vtuNumber));
+                        return (
+                        <div key={i} onClick={() => setSelectedStudent({...at, studentName: dbUser?.name || at.studentName || 'Unknown', userData: dbUser || at.userData || {}, dept: dbUser?.dept || at.dept || 'N/A', year: dbUser?.year || at.year || 'N/A', gender: dbUser?.gender || at.gender || 'N/A'})} className="p-4 rounded-2xl border border-gray-100 bg-[#FFF9F5]/40 flex justify-between items-center hover:bg-white hover:border-[#FF5722] hover:shadow-md cursor-pointer transition-all group">
                            <div>
                              <p className="font-bold text-sm text-gray-900 truncate w-32 capitalize group-hover:text-[#FF5722] transition-colors">{at.studentName}</p>
                              <p className="text-[10px] font-mono font-black text-gray-400 group-hover:text-gray-900 transition-colors mt-0.5">{at.vtuNumber}</p>
                            </div>
                            {at.isOverride && <span className="block text-[7px] text-red-500 font-black uppercase tracking-[0.2em] mt-1">Manual</span>}
                         </div>
-                      ))}
+                        );
+                      })}
                       {attendees.length === 0 && (
                         <div className="col-span-1 md:col-span-2 py-16 flex flex-col items-center justify-center opacity-40">
                           <span className="text-4xl mb-4 animate-bounce">📡</span>

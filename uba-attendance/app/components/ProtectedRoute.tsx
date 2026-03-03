@@ -28,15 +28,13 @@ export default function ProtectedRoute({ allowedRoles, children }: ProtectedRout
         return;
       }
 
-      // ==========================================
-      // THE FIX: OFFLINE BYPASS LOGIC
-      // ==========================================
-      if (!navigator.onLine) {
+      const cachedRole = localStorage.getItem('uba_cached_role');
+
+      // OFFLINE OR CACHE-FIRST BYPASS
+      if (!navigator.onLine && cachedRole) {
         console.log("[OFFLINE MODE] Bypassing backend auth check...");
-        const cachedRole = localStorage.getItem('uba_cached_role');
-        
-        if (cachedRole && (allowedRoles.includes(cachedRole) || cachedRole === "student_coordinator")) {
-          setLoading(false); // Let them in!
+        if (allowedRoles.includes(cachedRole) || cachedRole === "student_coordinator") {
+          setLoading(false); 
           return;
         } else {
           router.replace("/home");
@@ -44,21 +42,24 @@ export default function ProtectedRoute({ allowedRoles, children }: ProtectedRout
         }
       }
 
-      // ==========================================
-      // ONLINE VERIFICATION
-      // ==========================================
+      // ONLINE VERIFICATION (With timeout fallback)
       try {
         const token = await user.getIdToken();
+        
+        // 5-second timeout controller so it doesn't hang forever
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
+        
         const res = await fetch(`${API_URL}/whoami`, {
           headers: { Authorization: `Bearer ${token}` },
+          signal: controller.signal
         });
-
+        
+        clearTimeout(timeoutId);
         if (!res.ok) throw new Error("Failed to fetch role");
 
         const data = await res.json();
-
-        // CACHE THE ROLE SO IT WORKS NEXT TIME THEY GO OFFLINE
-        localStorage.setItem('uba_cached_role', data.role);
+        localStorage.setItem('uba_cached_role', data.role); // Cache it
 
         if (!isMounted) return;
 
@@ -68,15 +69,13 @@ export default function ProtectedRoute({ allowedRoles, children }: ProtectedRout
           setLoading(false);
         }
       } catch (err) {
-        console.error("Auth check failed:", err);
-        // FALLBACK: If the internet is just very slow/spotty and fetch fails
+        console.warn("Auth check slow/failed, using cache:", err);
         if (isMounted) {
-           const cachedRole = localStorage.getItem('uba_cached_role');
            if (cachedRole && (allowedRoles.includes(cachedRole) || cachedRole === "student_coordinator")) {
              setLoading(false);
            } else {
              setLoading(false);
-             router.replace("/login");
+             router.replace("/home"); // Default safe route
            }
         }
       }

@@ -105,18 +105,33 @@ export default function HomePage() {
   // 2. AUTH & DATA FETCHING
   // ==========================================
   const fetchUserStatus = async (user: any) => {
+    // 1. LOAD FROM CACHE IMMEDIATELY (Instant UI)
+    const cachedProfile = localStorage.getItem('uba_student_profile');
+    const cachedHistory = localStorage.getItem('uba_student_history');
+    const cachedLeaderboard = localStorage.getItem('uba_student_leaderboard');
+
+    if (cachedProfile) {
+        setUserData(JSON.parse(cachedProfile));
+        setHistory(cachedHistory ? JSON.parse(cachedHistory) : []);
+        setLeaderboard(cachedLeaderboard ? JSON.parse(cachedLeaderboard) : []);
+        setLoading(false); // Stop spinner immediately!
+    }
+
+    if (!navigator.onLine) {
+        setLoading(false);
+        return; // Stop here if totally offline
+    }
+
+    // 2. FETCH FRESH DATA IN BACKGROUND
     try {
       const token = await user.getIdToken();
-      
       const headers = {
           Authorization: `Bearer ${token}`,
           'x-device-id': localStorage.getItem('uba_permanent_device_id') || ''
       };
 
       const res = await fetch(`${API_URL}/whoami`, { headers });
-      if (!res.ok) {
-          throw new Error("Auth Failure");
-      }
+      if (!res.ok) throw new Error("Auth Failure");
       
       const data = await res.json();
       
@@ -135,20 +150,22 @@ export default function HomePage() {
         setNeedsSetup(true);
       }
 
-      // data now includes currentDeviceId & registeredDeviceId from backend!
-      setUserData({ ...data, ...profileData, name: profileData.name || user.displayName || data.name });
+      const combinedUserData = { ...data, ...profileData, name: profileData.name || user.displayName || data.name };
+      
+      // 3. UPDATE STATE AND OVERWRITE CACHE
+      setUserData(combinedUserData);
       setHistory(historyData.history || []);
       setLeaderboard(historyData.leaderboard || []);
-
-      const myRank = (historyData.leaderboard || []).findIndex((l: any) => l.vtuNumber === data.vtuNumber);
-      if (myRank >= 0 && myRank <= 2) {
-        confetti({ particleCount: 150, spread: 70, origin: { y: 0.6 }, colors: ['#FF5722', '#FFA726', '#FFCC80'] });
-      }
-
+      
+      localStorage.setItem('uba_student_profile', JSON.stringify(combinedUserData));
+      localStorage.setItem('uba_student_history', JSON.stringify(historyData.history || []));
+      localStorage.setItem('uba_student_leaderboard', JSON.stringify(historyData.leaderboard || []));
+      
     } catch (err) { 
-      console.error("Dashboard Load Error:", err);
-      if(!isOffline) alert("Cannot reach the backend server. Are you on the same Wi-Fi as the laptop?");
-    } finally { setLoading(false); }
+      console.error("Background Fetch Error:", err);
+    } finally { 
+      setLoading(false); // Ensure spinner dies no matter what
+    }
   };
 
   useEffect(() => {

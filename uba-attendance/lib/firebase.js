@@ -1,5 +1,5 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
-import { getAuth } from "firebase/auth";
+import { getAuth, setPersistence, indexedDBLocalPersistence } from "firebase/auth";
 import { getFirestore } from "firebase/firestore"; // Import Firestore
 
 const firebaseConfig = {
@@ -31,6 +31,11 @@ if (getApps().length === 0) {
 // Export Auth instance
 export const auth = getAuth(app);
 console.log("[FIREBASE] Auth instance created");
+
+// ENFORCE OFFLINE LOGIN CAPABILITY
+setPersistence(auth, indexedDBLocalPersistence)
+  .then(() => console.log("[FIREBASE] Offline persistence enabled"))
+  .catch((error) => console.error("[FIREBASE] Persistence error:", error));
 
 // Export Firestore (db) instance - THIS FIXES THE IMPORT ERROR
 export const db = getFirestore(app);
