@@ -129,6 +129,7 @@ export default function CoordinatorPage() {
 
         if (data.users) {
            localStorage.setItem('uba_users_cache', JSON.stringify(data.users));
+           localStorage.setItem('uba_master_roster', JSON.stringify(data.users));
         }
 
         if (forceSelectLatest && processedMeetings.length > 0) {
@@ -942,12 +943,20 @@ export default function CoordinatorPage() {
 
                           {activeTab === 'missing' && (
                             <div className="grid md:grid-cols-2 gap-3">
-                              {tabMissing.map((m:any, i:number) => (
-                                 <div key={i} onClick={() => setSelectedStudent({studentName: m.name, vtuNumber: m.vtu})} className="p-4 rounded-2xl border border-red-100 bg-white flex justify-between items-center shadow-sm cursor-pointer hover:border-red-500 transition-colors">
+                              {tabMissing.map((m:any, i:number) => {
+                                 const masterRoster = JSON.parse(localStorage.getItem('uba_master_roster') || '[]');
+                                 const studentData = masterRoster.find((u:any) => String(u.vtuNumber) === String(m.vtu)) || m;
+                                 const phone = studentData.phone || 'N/A';
+                                 return (
+                                 <div key={i} onClick={() => setSelectedStudent({studentName: m.name, vtuNumber: m.vtu, phone})} className="p-4 rounded-2xl border border-red-100 bg-white flex justify-between items-center shadow-sm cursor-pointer hover:border-red-500 transition-colors">
                                    <div><p className="font-bold text-sm text-gray-900">{m.name}</p><p className="text-[10px] font-mono font-bold text-gray-500">{m.vtu}</p></div>
-                                   <span className="text-[8px] px-2 py-1 bg-red-100 text-red-600 font-black rounded uppercase">Abandoned</span>
+                                   <div className="flex items-center gap-2">
+                                     {phone !== 'N/A' && <a href={`tel:${phone}`} onClick={(e) => e.stopPropagation()} className="text-[9px] px-2 py-1 bg-green-100 text-green-700 font-black rounded uppercase tracking-widest hover:bg-green-500 hover:text-white transition-colors">📞 Call</a>}
+                                     <span className="text-[8px] px-2 py-1 bg-red-100 text-red-600 font-black rounded uppercase">Abandoned</span>
+                                   </div>
                                  </div>
-                              ))}
+                                 );
+                              })}
                               {tabMissing.length === 0 && manifest.length > 0 && <p className="text-green-500 text-xs font-black uppercase text-center w-full py-10">100% Attendance Reached!</p>}
                             </div>
                           )}
@@ -1072,7 +1081,15 @@ export default function CoordinatorPage() {
       </div>
 
       {/* STUDENT DOSSIER MODAL */}
-      {selectedStudent && (
+      {selectedStudent && (() => {
+        const masterRoster = JSON.parse(localStorage.getItem('uba_master_roster') || '[]');
+        const vtu = selectedStudent.vtuNumber || selectedStudent.vtu;
+        const studentContact = masterRoster.find((u:any) => String(u.vtuNumber) === String(vtu)) || selectedStudent;
+        const phoneNum = studentContact.phone || 'N/A';
+        const studentName = studentContact.name || selectedStudent.studentName || 'Student';
+        const msg = `Hi ${studentName}, this is the UBA Student Coordinator. Your attendance verification is pending. Please contact your nearby coordinator to verify immediately. Attendance closes soon.`;
+        const encodedMsg = encodeURIComponent(msg);
+        return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm transition-opacity">
           <div className="bg-white rounded-[2rem] w-full max-w-md overflow-hidden shadow-2xl animate-in fade-in zoom-in duration-200">
             <div className="bg-gradient-to-br from-[#FFF9F5] to-white p-6 relative border-b border-gray-100">
@@ -1116,10 +1133,31 @@ export default function CoordinatorPage() {
                   <div className="text-center py-6 text-gray-400 text-xs font-medium italic">No verified field history found.</div>
                 )}
               </div>
+              {phoneNum !== 'N/A' && (
+                <div className="mt-6 border-t border-dashed border-gray-100 pt-6">
+                  <a href={`tel:${phoneNum}`} className="w-full bg-green-600 text-white py-4 rounded-2xl font-black text-[10px] uppercase tracking-[0.2em] flex items-center justify-center gap-3 shadow-xl hover:bg-green-700 active:scale-95 transition-all">
+                    <span>📞</span> Dial Phone Number
+                  </a>
+                  <p className="text-[8px] text-center mt-3 text-gray-400 font-bold uppercase tracking-widest">Verified: {phoneNum}</p>
+                </div>
+              )}
+              {phoneNum !== 'N/A' && (
+                <div className="grid grid-cols-2 gap-3 mt-3">
+                  <a href={`https://wa.me/91${phoneNum.replace(/\D/g, '')}?text=${encodedMsg}`} target="_blank" className="bg-[#25D366] text-white py-3 rounded-xl font-black text-[9px] uppercase tracking-widest flex items-center justify-center gap-2 shadow-md active:scale-95 transition-all">
+                    <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.414 0 .018 5.396.015 12.03c0 2.12.553 4.189 1.606 6.06L0 24l6.117-1.605a11.77 11.77 0 005.925 1.585h.005c6.635 0 12.032-5.396 12.035-12.03a11.79 11.79 0 00-3.517-8.503z"/></svg>
+                    WhatsApp
+                  </a>
+                  <a href={`sms:+91${phoneNum.replace(/\D/g, '')}?body=${encodedMsg}`} className="bg-[#007AFF] text-white py-3 rounded-xl font-black text-[9px] uppercase tracking-widest flex items-center justify-center gap-2 shadow-md active:scale-95 transition-all">
+                    <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24"><path d="M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H4V8l8 5 8-5v10zm-8-7L4 6h16l-8 5z"/></svg>
+                    SMS Text
+                  </a>
+                </div>
+              )}
             </div>
           </div>
         </div>
-      )}
+        );
+      })()}
     </ProtectedRoute>
   );
 }

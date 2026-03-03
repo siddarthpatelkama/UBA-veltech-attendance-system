@@ -429,7 +429,12 @@ export default function AdminPage() {
         )}
 
         {/* UNIVERSAL STUDENT DOSSIER MODAL */}
-        {selectedStudent && (
+        {selectedStudent && (() => {
+          const masterRoster = JSON.parse(localStorage.getItem('uba_master_roster') || '[]');
+          const vtu = selectedStudent.vtuNumber || selectedStudent.vtu;
+          const studentContact = masterRoster.find((u:any) => String(u.vtuNumber) === String(vtu)) || selectedStudent;
+          const phoneNum = studentContact.phone || 'N/A';
+          return (
           <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[150] p-4 backdrop-blur-sm" onClick={() => setSelectedStudent(null)}>
             <div className="w-full max-w-sm rounded-[2.5rem] p-8 border-2 border-[#FF5722] shadow-2xl bg-white animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
               <div className="flex justify-between items-start mb-6 border-b border-gray-100 pb-4">
@@ -445,12 +450,33 @@ export default function AdminPage() {
                 <div className="flex justify-between text-sm bg-gray-50 p-3 rounded-xl"><span className="font-bold text-gray-400 uppercase">Gender</span><span className="font-black">{selectedStudent.userData?.gender || selectedStudent.gender || 'N/A'}</span></div>
                 <div className="flex justify-between items-center text-sm bg-gray-50 p-3 rounded-xl"><span className="font-bold text-gray-400 uppercase text-[10px]">Device ID</span><span className="font-mono text-[9px] text-gray-400 truncate w-32 text-right">{selectedStudent.userData?.registeredDeviceId || 'Unset'}</span></div>
               </div>
+              {phoneNum !== 'N/A' && (
+                <div className="mt-6 border-t border-dashed border-gray-100 pt-6">
+                  <a href={`tel:${phoneNum}`} className="w-full bg-green-600 text-white py-4 rounded-2xl font-black text-[10px] uppercase tracking-[0.2em] flex items-center justify-center gap-3 shadow-xl hover:bg-green-700 active:scale-95 transition-all">
+                    <span>📞</span> Dial Phone Number
+                  </a>
+                  <p className="text-[8px] text-center mt-3 text-gray-400 font-bold uppercase tracking-widest">Verified: {phoneNum}</p>
+                </div>
+              )}
+              {phoneNum !== 'N/A' && (
+                <div className="grid grid-cols-2 gap-3 mt-3">
+                  <a href={`https://wa.me/91${phoneNum.replace(/\D/g, '')}`} target="_blank" className="bg-[#25D366] text-white py-3 rounded-xl font-black text-[9px] uppercase tracking-widest flex items-center justify-center gap-2 shadow-md active:scale-95 transition-all">
+                    <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.414 0 .018 5.396.015 12.03c0 2.12.553 4.189 1.606 6.06L0 24l6.117-1.605a11.77 11.77 0 005.925 1.585h.005c6.635 0 12.032-5.396 12.035-12.03a11.79 11.79 0 00-3.517-8.503z"/></svg>
+                    WhatsApp
+                  </a>
+                  <a href={`sms:+91${phoneNum.replace(/\D/g, '')}`} className="bg-[#007AFF] text-white py-3 rounded-xl font-black text-[9px] uppercase tracking-widest flex items-center justify-center gap-2 shadow-md active:scale-95 transition-all">
+                    <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24"><path d="M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H4V8l8 5 8-5v10zm-8-7L4 6h16l-8 5z"/></svg>
+                    SMS Text
+                  </a>
+                </div>
+              )}
               {selectedStudent.userData?.email && (
-                <button onClick={() => handleResetDevice(selectedStudent.userData?.email)} className="w-full bg-red-50 text-red-600 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-red-500 hover:text-white transition-all shadow-sm border border-red-100">Reset Phone Binding</button>
+                <button onClick={() => handleResetDevice(selectedStudent.userData?.email)} className="w-full bg-red-50 text-red-600 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-red-500 hover:text-white transition-all shadow-sm border border-red-100 mt-4">Reset Phone Binding</button>
               )}
             </div>
           </div>
-        )}
+          );
+        })()}
 
         {/* NAVBAR */}
         <nav className="bg-white border-b-2 border-[#FF5722] p-4 md:p-6 sticky top-0 shadow-sm z-40 relative">
