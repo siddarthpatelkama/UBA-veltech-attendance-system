@@ -198,7 +198,7 @@ export default function CoordinatorPage() {
     return () => clearInterval(syncInterval);
   }, [isOfflineMode]);
 
-  const hasActiveMeeting = useMemo(() => meetings.some(m => m.status === 'active'), [meetings]);
+  const hasActiveMeeting = useMemo(() => (meetings || []).some(m => m.status === 'active'), [meetings]);
 
   useEffect(() => {
     if (isOfflineMode || !hasActiveMeeting) return;
@@ -226,14 +226,14 @@ export default function CoordinatorPage() {
     
     setGreeting(g);
 
-    const myActive = meetings.filter(m => m.status === 'active' && m.coordinatorId === email);
+    const myActive = (meetings || []).filter(m => m.status === 'active' && m.coordinatorId === email);
     if (myActive.length > 1) setStatusMsg(`Looks like a busy day! 🔥 Wrap up quickly to save cloud bandwidth! 🏃💨`);
     else if (myActive.length === 1) setStatusMsg(`You're live! 🔴 Stay alert during scans.`);
     else setStatusMsg(`No active sessions. Start one? 🚀`);
   }, [meetings, users, auth.currentUser, myProfile]);
 
   useEffect(() => {
-    const activeMeeting = meetings.find(m => m.id === selectedMeetingId && m.status === 'active' && m.attendanceActive);
+    const activeMeeting = (meetings || []).find(m => m.id === selectedMeetingId && m.status === 'active' && m.attendanceActive);
     if (!activeMeeting || isOfflineMode) return;
 
     let interval = setInterval(() => {
@@ -295,7 +295,7 @@ export default function CoordinatorPage() {
     const phaseIdToUse = activePhase ? activePhase.id : 'none';
 
     import('html5-qrcode').then(({ Html5QrcodeScanner }) => {
-      scanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: { width: 250, height: 250 }, videoConstraints: { facingMode: "environment" } }, false);
+      scanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: { width: 250, height: 250 }, videoConstraints: { facingMode: { exact: "environment" } } }, false);
       
       scanner.render((decodedText: string) => {
         if (document.getElementById('scanner-overlay-active')) return;
@@ -484,7 +484,7 @@ export default function CoordinatorPage() {
       const newScans = vtus.map(v => ({
         meetingId: selectedMeetingId, action: 'add', vtu: v.toUpperCase().replace(/\D/g, ''),
         studentName: `Manual: ${v}`, timestamp: Date.now(), isOverride: true,
-        enteredBy: auth.currentUser?.email || 'Offline_Coord', phaseId: targetPhaseId,
+        enteredBy: auth.currentUser?.email || 'Offline_Coord', phaseId: targetPhaseId, isEmergency: isOfflineMode,
         vtuNumber: v.toUpperCase().replace(/\D/g, ''), dateString: new Date().toLocaleString()
       }));
       const updatedVault = [...vault, ...newScans];
@@ -505,6 +505,18 @@ export default function CoordinatorPage() {
     }
     setManualVtu('');
     setTimeout(() => setIsProcessing(false), 30000);
+  };
+
+  const handleLocalRemove = (vtuToRemove: string) => {
+    const savedVault = localStorage.getItem('uba_offline_vault');
+    if (!savedVault) return;
+    
+    const vault = JSON.parse(savedVault);
+    const updatedVault = vault.filter((s: any) => !(s.vtu === vtuToRemove && s.meetingId === selectedMeetingId));
+    
+    localStorage.setItem('uba_offline_vault', JSON.stringify(updatedVault));
+    setLocalOfflineScans(updatedVault);
+    showToast(`Deleted: ${vtuToRemove}`);
   };
 
   const handleOfflineSync = async () => {
@@ -629,8 +641,8 @@ export default function CoordinatorPage() {
     return ['All', ...Array.from(months)];
   }, [meetings]);
 
-  const filteredMeetings = meetings.filter(m => {
-    const searchMatch = m.title.toLowerCase().includes(searchQuery.toLowerCase()) || (m.createdByName || '').toLowerCase().includes(searchQuery.toLowerCase());
+  const filteredMeetings = (meetings || []).filter(m => {
+    const searchMatch = (m.title || '').toLowerCase().includes(searchQuery.toLowerCase()) || (m.createdByName || '').toLowerCase().includes(searchQuery.toLowerCase());
     const d = new Date(getSafeTime(m.createdAt));
     const mMonth = `${d.toLocaleString('default', { month: 'short' })} ${d.getFullYear()}`;
     const monthMatch = filterMonth === 'All' || filterMonth === mMonth;
@@ -640,9 +652,9 @@ export default function CoordinatorPage() {
   const myEmail = auth.currentUser?.email || '';
   const myNameRaw = myEmail.split('@')[0].replace(/\D/g, ''); 
   const currentUserData = myProfile || users.find(u => u.vtuNumber === myNameRaw) || {};
-  const myMeetings = meetings.filter(m => m.coordinatorId === myEmail);
+  const myMeetings = (meetings || []).filter(m => m.coordinatorId === myEmail);
   const myTotalMeetings = myMeetings.length;
-  const myTotalStudents = attendance.filter(a => myMeetings.some(m => m.id === a.meetingId)).length;
+  const myTotalStudents = (attendance || []).filter(a => myMeetings.some(m => m.id === a.meetingId)).length;
 
   const cleanLookup = vtuLookup.trim().toUpperCase();
   const numericLookup = cleanLookup.replace(/\D/g, '');
@@ -655,12 +667,12 @@ export default function CoordinatorPage() {
   }) : null;
   const searchedUserAttendance = searchedUser ? attendance.filter(a => a.vtuNumber === searchedUser.vtuNumber) : [];
 
-  const activeMeetingExists = meetings.some(m => m.status === 'active');
+  const activeMeetingExists = (meetings || []).some(m => m.status === 'active');
   const displayId = selectedMeetingId || meetings[0]?.id;
-  const displayMeeting = meetings.find(m => m.id === displayId);
+  const displayMeeting = (meetings || []).find(m => m.id === displayId);
   
-  const cloudAttendees = attendance.filter(a => a.meetingId === displayId);
-  const localAttendees = localOfflineScans.filter(s => s.meetingId === displayId);
+  const cloudAttendees = (attendance || []).filter(a => a.meetingId === displayId);
+  const localAttendees = (localOfflineScans || []).filter(s => s.meetingId === displayId);
   const totalDisplayAttendees = [...cloudAttendees, ...localAttendees];
 
   const isVerifiable = displayMeeting?.type === 'verifiable';
@@ -671,10 +683,10 @@ export default function CoordinatorPage() {
   const phaseAttendees = activePhase ? totalDisplayAttendees.filter(a => a.phaseId === activePhase.id) : totalDisplayAttendees;
   const verifiedVtus = phaseAttendees.map(a => a.vtuNumber);
   
-  const tabMissing = isVerifiable ? manifest.filter((m:any) => !verifiedVtus.includes(m.vtu)) : [];
-  const tabVerified = phaseAttendees.filter(a => !a.isOverride);
-  const tabManual = phaseAttendees.filter(a => a.isOverride);
-  const tabSuspicious = suspiciousLogs.filter(s => s.meetingId === displayId && (!activePhase || s.phaseId === activePhase.id));
+  const tabMissing = isVerifiable ? (manifest || []).filter((m:any) => !verifiedVtus.includes(m.vtu)) : [];
+  const tabVerified = (phaseAttendees || []).filter(a => !a.isOverride);
+  const tabManual = (phaseAttendees || []).filter(a => a.isOverride);
+  const tabSuspicious = (suspiciousLogs || []).filter(s => s.meetingId === displayId && (!activePhase || s.phaseId === activePhase.id));
 
   if (initialLoad) return (
     <div className="h-screen flex items-center justify-center bg-white">
@@ -1026,16 +1038,27 @@ export default function CoordinatorPage() {
                           {activeTab === 'verified' && (
                             <div className="grid md:grid-cols-2 gap-3">
                               {tabVerified.map((at, i) => (
-                                 <div key={i} onClick={() => setSelectedStudent({studentName: at.studentName, vtuNumber: at.vtuNumber})} className="p-4 rounded-2xl border border-gray-100 bg-[#FFF9F5]/30 flex justify-between items-center shadow-sm cursor-pointer hover:border-[#FF5722] transition-colors">
-                                   <div><p className="font-bold text-sm text-gray-900">{at.studentName}</p><p className="text-[10px] font-mono font-bold text-[#FF5722]">{at.vtuNumber}</p></div>
-                                   <span className="text-[9px] font-black text-gray-400">
-                                     {new Date(at.timestamp).toLocaleString('en-IN', {
-                                       timeZone: 'Asia/Kolkata',
-                                       hour: '2-digit',
-                                       minute: '2-digit',
-                                       hour12: true
-                                     })}
-                                   </span>
+                                 <div key={i} className="p-4 rounded-2xl border border-gray-100 bg-[#FFF9F5]/30 flex justify-between items-center shadow-sm group hover:border-red-200 transition-all">
+                                   <div onClick={() => setSelectedStudent({studentName: at.studentName, vtuNumber: at.vtuNumber})} className="cursor-pointer flex-grow">
+                                     <p className="font-bold text-sm text-gray-900">{at.studentName}</p>
+                                     <p className="text-[10px] font-mono font-bold text-[#FF5722]">{at.vtuNumber}</p>
+                                   </div>
+                                   <div className="flex items-center gap-2">
+                                     <span className="text-[9px] font-black text-gray-400">
+                                       {new Date(at.timestamp).toLocaleString('en-IN', {
+                                         timeZone: 'Asia/Kolkata',
+                                         hour: '2-digit',
+                                         minute: '2-digit',
+                                         hour12: true
+                                       })}
+                                     </span>
+                                     <button 
+                                       onClick={(e) => { e.stopPropagation(); if(confirm(`Remove ${at.vtuNumber}?`)) handleLocalRemove(at.vtuNumber); }}
+                                       className="ml-2 p-2 bg-red-50 text-red-600 rounded-xl opacity-0 group-hover:opacity-100 active:scale-90 transition-all shadow-sm border border-red-100"
+                                     >
+                                       ✕
+                                     </button>
+                                   </div>
                                  </div>
                               ))}
                               {tabVerified.length === 0 && <p className="text-gray-300 text-xs font-black uppercase text-center w-full py-10">No verified scans</p>}
@@ -1065,9 +1088,20 @@ export default function CoordinatorPage() {
                           {activeTab === 'manual' && (
                             <div className="grid md:grid-cols-2 gap-3">
                               {tabManual.map((at, i) => (
-                                 <div key={i} onClick={() => setSelectedStudent({studentName: at.studentName, vtuNumber: at.vtuNumber, enteredBy: at.enteredBy})} className="p-4 rounded-2xl border border-gray-200 bg-gray-50 flex justify-between items-center cursor-pointer hover:border-gray-500 transition-colors">
-                                   <div><p className="font-bold text-sm text-gray-900">{at.studentName}</p><p className="text-[10px] font-mono font-bold text-gray-500">{at.vtuNumber}</p></div>
-                                   <div className="text-right"><p className="text-[8px] bg-gray-800 text-white px-2 py-1 rounded font-black uppercase mb-1">Override</p><p className="text-[8px] font-bold text-gray-400">{at.enteredBy?.split('@')[0]}</p></div>
+                                 <div key={i} className="p-4 rounded-2xl border border-gray-200 bg-gray-50 flex justify-between items-center group hover:border-red-200 transition-all">
+                                   <div onClick={() => setSelectedStudent({studentName: at.studentName, vtuNumber: at.vtuNumber, enteredBy: at.enteredBy})} className="cursor-pointer flex-grow">
+                                     <p className="font-bold text-sm text-gray-900">{at.studentName}</p>
+                                     <p className="text-[10px] font-mono font-bold text-gray-500">{at.vtuNumber}</p>
+                                   </div>
+                                   <div className="flex items-center gap-2">
+                                     <div className="text-right"><p className="text-[8px] bg-gray-800 text-white px-2 py-1 rounded font-black uppercase mb-1">Override</p><p className="text-[8px] font-bold text-gray-400">{at.enteredBy?.split('@')[0]}</p></div>
+                                     <button 
+                                       onClick={(e) => { e.stopPropagation(); if(confirm(`Remove ${at.vtuNumber}?`)) handleLocalRemove(at.vtuNumber); }}
+                                       className="ml-2 p-2 bg-red-50 text-red-600 rounded-xl opacity-0 group-hover:opacity-100 active:scale-90 transition-all shadow-sm border border-red-100"
+                                     >
+                                       ✕
+                                     </button>
+                                   </div>
                                  </div>
                               ))}
                               {tabManual.length === 0 && <p className="text-gray-300 text-xs font-black uppercase text-center w-full py-10">No manual entries</p>}

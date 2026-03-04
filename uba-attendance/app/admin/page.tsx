@@ -251,10 +251,10 @@ export default function AdminPage() {
   };
 
   const downloadMeetingCSV = (meetingId: string, meetingTitle: string) => {
-    const meeting = data.meetings.find((m: any) => m.id === meetingId);
+    const meeting = (data.meetings || []).find((m: any) => m.id === meetingId);
     if (!meeting) return showToast("Meeting not found.");
 
-    const attendees = data.attendance.filter((a: any) => a.meetingId === meetingId);
+    const attendees = (data.attendance || []).filter((a: any) => a.meetingId === meetingId);
     const isVerifiable = meeting.type === 'verifiable';
     const phases = meeting.phases || [];
     const totalPhases = phases.length;
@@ -320,7 +320,7 @@ export default function AdminPage() {
     // 4. Generate Rows
     exportList.forEach((stat, index) => {
       // Master Roster Priority Lookup
-      const u = data.users.find((user: any) => String(user.vtuNumber) === stat.vtu) || {};
+      const u = (data.users || []).find((user: any) => String(user.vtuNumber) === stat.vtu) || {};
       const finalName = u.name || stat.name || 'Unknown';
       const gender = u.gender || 'N/A';
       const dept = u.dept || 'N/A';
@@ -366,7 +366,7 @@ export default function AdminPage() {
   const getMeetingStats = (attendeesList: any[]) => {
     return attendeesList.reduce((acc: any, curr: any) => {
       // Find the user in the Master Roster (data.users)
-      const user = data.users.find((u: any) => String(u.vtuNumber) === String(curr.vtuNumber));
+      const user = (data.users || []).find((u: any) => String(u.vtuNumber) === String(curr.vtuNumber));
       
       // Use Master Roster data if available, otherwise fallback to temporary scan data
       const gen = String(user?.gender || curr.gender || 'Unknown').toUpperCase();
@@ -397,7 +397,7 @@ export default function AdminPage() {
   }, [data.meetings]);
 
   const filteredMeetings = (data.meetings || []).filter((m: any) => {
-    const searchMatch = m.title.toLowerCase().includes(searchQuery.toLowerCase()) || (m.createdByName || '').toLowerCase().includes(searchQuery.toLowerCase());
+    const searchMatch = (m.title || '').toLowerCase().includes(searchQuery.toLowerCase()) || (m.createdByName || '').toLowerCase().includes(searchQuery.toLowerCase());
     const d = new Date(getSafeTime(m.createdAt));
     const mMonth = `${d.toLocaleString('default', { month: 'short' })} ${d.getFullYear()}`;
     return searchMatch && (filterMonth === 'All' || filterMonth === mMonth);
@@ -516,9 +516,9 @@ export default function AdminPage() {
           {/* STAT BOXES */}
           <div className="lg:col-span-12 grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
             <div className="p-6 rounded-3xl shadow-sm text-center border-b-4 border-[#FF5722] bg-white"><p className="text-[10px] font-black uppercase text-gray-400 mb-1 tracking-widest">Total Trips</p><p className="text-4xl font-black text-gray-900">{filteredMeetings.length}</p></div>
-            <div className="p-6 rounded-3xl shadow-sm text-center border-b-4 border-[#FF5722] bg-white"><p className="text-[10px] font-black uppercase text-gray-400 mb-1 tracking-widest">Total Scans</p><p className="text-4xl font-black text-gray-900">{data.attendance.length}</p></div>
-            <div className="p-6 rounded-3xl shadow-sm text-center border-b-4 border-gray-900 bg-white"><p className="text-[10px] font-black uppercase text-gray-400 mb-1 tracking-widest">Members</p><p className="text-4xl font-black text-gray-900">{data.users.length}</p></div>
-            <div className="p-6 rounded-3xl shadow-sm text-center border-b-4 border-red-500 bg-red-50"><p className="text-[10px] font-black uppercase text-red-400 mb-1 tracking-widest italic">Security Flags</p><p className="text-4xl font-black text-red-600 animate-pulse">{data.suspiciousLogs.length}</p></div>
+            <div className="p-6 rounded-3xl shadow-sm text-center border-b-4 border-[#FF5722] bg-white"><p className="text-[10px] font-black uppercase text-gray-400 mb-1 tracking-widest">Total Scans</p><p className="text-4xl font-black text-gray-900">{(data.attendance || []).length}</p></div>
+            <div className="p-6 rounded-3xl shadow-sm text-center border-b-4 border-gray-900 bg-white"><p className="text-[10px] font-black uppercase text-gray-400 mb-1 tracking-widest">Members</p><p className="text-4xl font-black text-gray-900">{(data.users || []).length}</p></div>
+            <div className="p-6 rounded-3xl shadow-sm text-center border-b-4 border-red-500 bg-red-50"><p className="text-[10px] font-black uppercase text-red-400 mb-1 tracking-widest italic">Security Flags</p><p className="text-4xl font-black text-red-600 animate-pulse">{(data.suspiciousLogs || []).length}</p></div>
           </div>
 
           {/* EVENTS COLUMN */}
@@ -534,8 +534,8 @@ export default function AdminPage() {
             </div>
 
             {displayedMeetings.map((m: any) => {
-              const attendees = data.attendance.filter((a:any) => a.meetingId === m.id);
-              const suspicious = data.suspiciousLogs.filter((s:any) => s.meetingId === m.id);
+              const attendees = (data.attendance || []).filter((a:any) => a.meetingId === m.id);
+              const suspicious = (data.suspiciousLogs || []).filter((s:any) => s.meetingId === m.id);
               const manifest = m.manifest || [];
               const stats = getMeetingStats(attendees);
               
@@ -613,7 +613,7 @@ export default function AdminPage() {
 
                         <div className="grid md:grid-cols-2 gap-3 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
                           {activeTab === 'verified' && tabVerified.map((at:any, i:number) => {
-                           const dbUser = data.users.find((u:any)=>String(u.vtuNumber) === String(at.vtuNumber));
+                           const dbUser = (data.users || []).find((u:any)=>String(u.vtuNumber) === String(at.vtuNumber));
                            return (
                              <div key={i} onClick={() => setSelectedStudent({...at, studentName: dbUser?.name || at.studentName || 'Unknown', userData: dbUser || at.userData || {}, dept: dbUser?.dept || at.dept || 'N/A', year: dbUser?.year || at.year || 'N/A', gender: dbUser?.gender || at.gender || 'N/A'})} className="p-4 rounded-2xl border border-gray-200 bg-white flex justify-between items-center shadow-sm hover:border-[#FF5722] hover:shadow-md transition-all cursor-pointer">
                                <div><p className="font-bold text-sm text-gray-900 capitalize truncate w-40">{at.studentName}</p><p className="text-[10px] font-mono font-black text-[#FF5722] mt-0.5">{at.vtuNumber}</p></div>
@@ -622,7 +622,7 @@ export default function AdminPage() {
                           })}
 
                           {activeTab === 'missing' && tabMissing.map((m:any, i:number) => {
-                           const dbUser = data.users.find((u:any)=>String(u.vtuNumber) === String(m.vtu));
+                           const dbUser = (data.users || []).find((u:any)=>String(u.vtuNumber) === String(m.vtu));
                            return (
                              <div key={i} onClick={() => setSelectedStudent({studentName: dbUser?.name || m.name || 'Unknown', vtuNumber: m.vtu, userData: dbUser || {}, dept: dbUser?.dept || 'N/A', year: dbUser?.year || 'N/A', gender: dbUser?.gender || 'N/A'})} className="p-4 rounded-2xl border border-red-200 bg-red-50 flex justify-between items-center shadow-sm hover:bg-red-100 transition-all cursor-pointer">
                                <div><p className="font-bold text-sm text-red-900 capitalize truncate w-40">{m.name}</p><p className="text-[10px] font-mono font-black text-red-500 mt-0.5">{m.vtu}</p></div>
@@ -632,7 +632,7 @@ export default function AdminPage() {
                           })}
 
                           {activeTab === 'manual' && tabManual.map((at:any, i:number) => {
-                           const dbUser = data.users.find((u:any)=>String(u.vtuNumber) === String(at.vtuNumber));
+                           const dbUser = (data.users || []).find((u:any)=>String(u.vtuNumber) === String(at.vtuNumber));
                            return (
                              <div key={i} onClick={() => setSelectedStudent({...at, studentName: dbUser?.name || at.studentName || 'Unknown', userData: dbUser || at.userData || {}, dept: dbUser?.dept || at.dept || 'N/A', year: dbUser?.year || at.year || 'N/A', gender: dbUser?.gender || at.gender || 'N/A'})} className="p-4 rounded-2xl border-2 border-dashed border-gray-300 bg-white flex justify-between items-center cursor-pointer hover:border-gray-500 transition-colors">
                                <div><p className="font-bold text-sm text-gray-900 capitalize truncate w-32">{at.studentName}</p><p className="text-[10px] font-mono font-black text-gray-500 mt-0.5">{at.vtuNumber}</p></div>
@@ -670,7 +670,7 @@ export default function AdminPage() {
                   {!isAnalytics && (
                     <div className="grid md:grid-cols-2 gap-3 max-h-[250px] overflow-y-auto pr-2 custom-scrollbar">
                       {attendees.map((at:any, i:number) => {
-                        const dbUser = data.users.find((u:any)=>String(u.vtuNumber) === String(at.vtuNumber));
+                        const dbUser = (data.users || []).find((u:any)=>String(u.vtuNumber) === String(at.vtuNumber));
                         return (
                         <div key={i} onClick={() => setSelectedStudent({...at, studentName: dbUser?.name || at.studentName || 'Unknown', userData: dbUser || at.userData || {}, dept: dbUser?.dept || at.dept || 'N/A', year: dbUser?.year || at.year || 'N/A', gender: dbUser?.gender || at.gender || 'N/A'})} className="p-4 rounded-2xl border border-gray-100 bg-[#FFF9F5]/40 flex justify-between items-center hover:bg-white hover:border-[#FF5722] hover:shadow-md cursor-pointer transition-all group">
                            <div>
