@@ -295,7 +295,7 @@ export default function CoordinatorPage() {
     const phaseIdToUse = activePhase ? activePhase.id : 'none';
 
     import('html5-qrcode').then(({ Html5QrcodeScanner }) => {
-      scanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: { width: 250, height: 250 } }, false);
+      scanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: { width: 250, height: 250 }, videoConstraints: { facingMode: "environment" } }, false);
       
       scanner.render((decodedText: string) => {
         if (document.getElementById('scanner-overlay-active')) return;
@@ -473,26 +473,35 @@ export default function CoordinatorPage() {
     if (!manualVtu.trim()) return showToast("Enter VTU Number");
     setIsProcessing(true);
     const token = await auth.currentUser?.getIdToken();
-    const vtuToUse = manualVtu.toUpperCase().replace(/\D/g, '');
+    const vtus = manualVtu.split(' ').filter(v => v.length > 0);
     
     const displayMeeting = meetings.find(m => m.id === selectedMeetingId);
     const activePhase = displayMeeting?.type === 'verifiable' ? (displayMeeting.phases || []).find((p:any) => p.status === 'active') : null;
     const targetPhaseId = overridePhaseId || (activePhase ? activePhase.id : 'none');
 
-    const payload = { meetingId: selectedMeetingId, action: 'add', vtu: vtuToUse, isOverride: true, enteredBy: auth.currentUser?.email, phaseId: targetPhaseId };
-
     if (isOfflineMode) {
-      const newScan = { ...payload, studentName: `Offline: ${vtuToUse}`, timestamp: Date.now(), dateString: new Date().toLocaleString(), vtuNumber: vtuToUse };
-      const updated = [...localOfflineScans, newScan];
-      setLocalOfflineScans(updated);
-      localStorage.setItem('uba_offline_vault', JSON.stringify(updated));
-      showToast("Manual Override Saved to Vault");
+      const vault = JSON.parse(localStorage.getItem('uba_offline_vault') || '[]');
+      const newScans = vtus.map(v => ({
+        meetingId: selectedMeetingId, action: 'add', vtu: v.toUpperCase().replace(/\D/g, ''),
+        studentName: `Manual: ${v}`, timestamp: Date.now(), isOverride: true,
+        enteredBy: auth.currentUser?.email || 'Offline_Coord', phaseId: targetPhaseId,
+        vtuNumber: v.toUpperCase().replace(/\D/g, ''), dateString: new Date().toLocaleString()
+      }));
+      const updatedVault = [...vault, ...newScans];
+      localStorage.setItem('uba_offline_vault', JSON.stringify(updatedVault));
+      setLocalOfflineScans(updatedVault);
+      showToast(`${vtus.length} VTUs injected into Vault`);
     } else {
-      const res = await fetch(`${API_URL}/meeting/update-manifest`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify(payload)
-      });
-      if (res.ok) { await fetchData(false); showToast("Manual Override Verified"); }
+      for (const v of vtus) {
+        const vtuToUse = v.toUpperCase().replace(/\D/g, '');
+        const payload = { meetingId: selectedMeetingId, action: 'add', vtu: vtuToUse, isOverride: true, enteredBy: auth.currentUser?.email, phaseId: targetPhaseId };
+        const res = await fetch(`${API_URL}/meeting/update-manifest`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify(payload)
+        });
+      }
+      await fetchData(false);
+      showToast(`${vtus.length} Manual Override(s) Verified`);
     }
     setManualVtu('');
     setTimeout(() => setIsProcessing(false), 30000);
@@ -588,6 +597,13 @@ export default function CoordinatorPage() {
   };
 
   const handleCloseMeeting = async () => {
+    if (isOfflineMode) {
+      // LOCAL CLOSE: Update meetings state and localStorage directly
+      setMeetings(prev => prev.map(m => m.id === confirmEndSession ? { ...m, status: 'closed', attendanceActive: false } : m));
+      setConfirmEndSession(null);
+      showToast("Session Closed Locally (Vault Mode)");
+      return;
+    }
     const token = await auth.currentUser?.getIdToken();
     await fetch(`${API_URL}/meeting/close`, {
       method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -927,7 +943,7 @@ export default function CoordinatorPage() {
                                   <div id="reader" className="w-full min-h-[250px] bg-black rounded-2xl overflow-hidden mb-4 relative"><p className="absolute inset-0 flex items-center justify-center text-white text-[10px] font-black uppercase tracking-widest animate-pulse z-10 pointer-events-none">Initializing Camera... Please allow permissions.</p></div>
                                   {scannerSuccess && (<div className="w-full bg-green-500 text-white font-black p-3 text-center rounded-xl mb-4 animate-pulse">✅ {scannerSuccess}</div>)}
                                   {scannerError && (<div className="w-full bg-red-600 text-white font-black p-3 text-center rounded-xl mb-4 animate-bounce">🚨 {scannerError}</div>)}
-                                  <button onClick={() => { setShowScanner(false); setScannerError(''); setScannerSuccess(''); }} className="w-full bg-gray-200 text-gray-700 font-black py-3 rounded-xl uppercase text-xs">Close Camera</button>
+                                  <button onClick={() => { setShowScanner(false); setScannerError(''); setScannerSuccess(''); }} className="w-full bg-red-600 text-white font-black py-4 rounded-xl uppercase text-xs tracking-widest shadow-lg hover:bg-red-700 active:scale-95 transition-all">✕ Close Camera</button>
                                </div>
                             ) : (
                                <>
