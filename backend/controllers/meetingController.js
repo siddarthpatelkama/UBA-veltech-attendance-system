@@ -178,49 +178,76 @@ exports.getMeetings = async (req, res) => {
   }
 };
 
-// --- SECURE CONDITIONAL SYNC ---
+// --- SEVERED-CONNECTION SYNC (with Emergency Routing) ---
 exports.syncOfflineAttendance = async (req, res) => {
   try {
-    const { scans } = req.body; 
-    const results = { success: 0, failed: 0, rejectedBySecurity: 0 };
+    const { scans } = req.body;
+
+    if (!scans || !Array.isArray(scans) || scans.length === 0) {
+      return res.status(400).json({ error: "No scans provided for sync" });
+    }
+
+    const batch = db.batch();
 
     for (const scan of scans) {
-      const meetingDoc = await db.collection("meetings").doc(scan.meetingId).get();
-      if (!meetingDoc.exists) {
-        results.failed++;
-        continue;
-      }
+      if (scan.isEmergency) {
+        // 🚨 EMERGENCY ROUTING: Send to completely separate tables
 
-      if (!meetingDoc.data().isOfflineEnabled) {
-        results.rejectedBySecurity++;
-        continue; 
-      }
+        // 1. Create/Merge Emergency Meeting Record
+        const emergencyMeetingRef = db.collection('emergency_meetings').doc(scan.meetingId);
+        batch.set(emergencyMeetingRef, {
+          id: scan.meetingId,
+          title: scan.meetingTitle || 'Emergency Offline Session',
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          isEmergency: true,
+          coordinatorId: scan.enteredBy || 'Offline_Coord'
+        }, { merge: true });
 
-      const vtuClean = scan.vtu.toUpperCase().trim();
-      const existing = await db.collection("attendance")
-        .where("meetingId", "==", scan.meetingId)
-        .where("vtuNumber", "==", vtuClean)
-        .get();
-
-      if (existing.empty) {
-        await db.collection("attendance").add({
+        // 2. Log Student in Emergency Attendance
+        const emergencyAttendanceRef = db.collection('emergency_attendance').doc(`${scan.meetingId}_${scan.vtu}`);
+        batch.set(emergencyAttendanceRef, {
           meetingId: scan.meetingId,
-          vtuNumber: vtuClean,
-          studentName: scan.studentName || "Verified (Offline Sync)",
-          timestamp: scan.timestamp, 
-          isOfflineSync: true,
-          isOverride: scan.isOverride || false, 
-          dateString: new Date(scan.timestamp).toLocaleString()
-        });
-        results.success++;
+          vtuNumber: scan.vtu,
+          studentName: scan.studentName || 'Unknown',
+          timestamp: scan.timestamp || Date.now(),
+          phaseId: scan.phaseId || 'none',
+          isOverride: scan.isOverride || false,
+          enteredBy: scan.enteredBy || 'Offline_Coord',
+          emergencyDeviceId: scan.emergencyDeviceId || 'N/A',
+          isEmergency: true
+        }, { merge: true });
+
       } else {
-        results.failed++; 
+        // 🟢 STANDARD ROUTING: Normal offline vault logic
+
+        // 1. Update standard meeting timestamp
+        const meetingRef = db.collection('meetings').doc(scan.meetingId);
+        batch.set(meetingRef, {
+          lastOfflineSync: admin.firestore.FieldValue.serverTimestamp()
+        }, { merge: true });
+
+        // 2. Log Student in Standard Attendance
+        const attendanceRef = db.collection('attendance').doc(`${scan.meetingId}_${scan.vtu}_${scan.phaseId || 'none'}`);
+        batch.set(attendanceRef, {
+          meetingId: scan.meetingId,
+          vtuNumber: scan.vtu,
+          studentName: scan.studentName || 'Unknown',
+          timestamp: scan.timestamp || Date.now(),
+          phaseId: scan.phaseId || 'none',
+          isOverride: scan.isOverride || false,
+          enteredBy: scan.enteredBy || 'System'
+        }, { merge: true });
       }
     }
-    res.json({ message: "Sync processed", ...results });
+
+    // Commit all writes simultaneously (Costs only 1 network request!)
+    await batch.commit();
+
+    res.status(200).json({ message: "Cloud Sync successful, emergency data routed correctly." });
+
   } catch (error) {
-    console.error("Sync Error:", error);
-    res.status(500).json({ error: "Sync failed" });
+    console.error("Critical Offline Sync Error:", error);
+    res.status(500).json({ error: "Failed to sync offline scans." });
   }
 };
 

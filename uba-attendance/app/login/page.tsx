@@ -6,6 +6,7 @@ import { auth } from "../../lib/firebase";
 import { signInWithPopup, GoogleAuthProvider, signInWithCredential, User, onAuthStateChanged } from "firebase/auth";
 import { Capacitor } from '@capacitor/core';
 import { GoogleAuth } from '@codetrix-studio/capacitor-google-auth';
+import Link from 'next/link';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -174,6 +175,18 @@ export default function LoginPage() {
            <div className="h-1 w-1 bg-gray-300 rounded-full"></div>
            <div className="h-1 w-1 bg-gray-300 rounded-full"></div>
            <div className="h-1 w-1 bg-gray-300 rounded-full"></div>
+        </div>
+
+        <div className="mt-8 pt-6 border-t-2 border-dashed border-gray-200 text-center">
+          <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-3">System Offline Tools</p>
+          <div className="grid grid-cols-2 gap-3">
+            <Link href="/emergency" className="bg-red-50 text-red-600 border border-red-200 font-black py-3 rounded-xl uppercase tracking-widest text-[9px] shadow-sm hover:bg-red-500 hover:text-white transition-all flex flex-col items-center gap-1">
+              <span className="text-lg">📱</span> Student QR
+            </Link>
+            <Link href="/emergency-coord" className="bg-gray-900 text-white border border-gray-800 font-black py-3 rounded-xl uppercase tracking-widest text-[9px] shadow-sm hover:bg-black transition-all flex flex-col items-center gap-1">
+              <span className="text-lg">🛡️</span> Coord Air-Gap
+            </Link>
+          </div>
         </div>
       </div>
     </div>

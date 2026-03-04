@@ -7,6 +7,7 @@ import { onAuthStateChanged, signOut } from 'firebase/auth';
 import confetti from 'canvas-confetti';
 import QRCode from 'react-qr-code';
 import CryptoJS from 'crypto-js';
+import Link from 'next/link';
 
 export default function HomePage() {
   const router = useRouter();
@@ -362,6 +363,13 @@ export default function HomePage() {
                 <button key={t} onClick={() => { setActiveView(t as any); setIsMenuOpen(false); }} className="block w-full text-left font-black uppercase italic text-2xl text-gray-900">{t}</button>
              ))}
              <button onClick={() => signOut(auth)} className="w-full py-4 bg-red-50 text-red-500 font-black rounded-2xl uppercase text-xs">Logout</button>
+             <Link href="/emergency" className="flex items-center gap-3 w-full py-4 px-4 bg-red-50 text-red-600 font-black rounded-2xl uppercase text-xs tracking-widest border border-red-200 mt-2 hover:bg-red-100 transition-colors">
+               <span className="text-lg">🚨</span>
+               <div>
+                 <p>Emergency QR</p>
+                 <p className="text-[8px] opacity-70">Server Down Override</p>
+               </div>
+             </Link>
           </div>
         )}
       </nav>

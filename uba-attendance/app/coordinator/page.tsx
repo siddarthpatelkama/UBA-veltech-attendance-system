@@ -42,6 +42,8 @@ export default function CoordinatorPage() {
   const [localOfflineScans, setLocalOfflineScans] = useState<any[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
   const [showLowNetworkWarning, setShowLowNetworkWarning] = useState(false);
+  const [isEmergencyMode, setIsEmergencyMode] = useState(false);
+  const [emergencyDeviceLocks, setEmergencyDeviceLocks] = useState<Record<string, string>>({});
   
   const [showScanner, setShowScanner] = useState(false);
   const [scannerError, setScannerError] = useState('');
@@ -155,8 +157,46 @@ export default function CoordinatorPage() {
     const saved = localStorage.getItem('uba_offline_vault');
     if (saved) setLocalOfflineScans(JSON.parse(saved));
 
+    const savedLocks = localStorage.getItem('uba_emergency_locks');
+    if (savedLocks) setEmergencyDeviceLocks(JSON.parse(savedLocks));
+
     return () => unsub();
   }, []);
+
+  useEffect(() => {
+    const autoSyncVault = async () => {
+      const savedVault = localStorage.getItem('uba_offline_vault');
+      if (!savedVault || isOfflineMode || !navigator.onLine) return;
+
+      const scans = JSON.parse(savedVault);
+      if (scans.length === 0) return;
+
+      try {
+        const token = await auth.currentUser?.getIdToken();
+        if (!token) return; // Only sync if fully authenticated
+
+        const res = await fetch(`${API_URL}/meeting/offline-sync`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ scans })
+        });
+
+        if (res.ok) {
+          localStorage.removeItem('uba_offline_vault');
+          setLocalOfflineScans([]);
+          showToast("Automatic Vault Sync Complete!");
+          fetchData(true);
+        }
+      } catch (e) {
+        console.log("Auto-sync deferred: backend unreachable");
+      }
+    };
+
+    // Run on mount and periodically if online
+    autoSyncVault();
+    const syncInterval = setInterval(autoSyncVault, 60000); // Check every minute
+    return () => clearInterval(syncInterval);
+  }, [isOfflineMode]);
 
   const hasActiveMeeting = useMemo(() => meetings.some(m => m.status === 'active'), [meetings]);
 
@@ -262,7 +302,7 @@ export default function CoordinatorPage() {
 
         try {
           const payload = JSON.parse(atob(decodedText));
-          const { vtu, timeSlot, hash, deviceId } = payload; 
+          const { vtu, timeSlot, hash, deviceId, isEmergency } = payload; 
           const currentSlot = Math.floor(Date.now() / 20000);
           
           if (Math.abs(currentSlot - timeSlot) > 1) {
@@ -274,6 +314,26 @@ export default function CoordinatorPage() {
           
           if (hash !== expectedHash) {
             playErrorSound(); setScannerError(`INVALID SIGNATURE!`); setTimeout(() => setScannerError(''), 2500); return;
+          }
+
+          // --- STRICT EMERGENCY DEVICE LOCK ---
+          if (isEmergency) {
+            const currentLocks = JSON.parse(localStorage.getItem('uba_emergency_locks') || '{}');
+
+            // If device is already locked to a DIFFERENT VTU
+            if (currentLocks[deviceId] && currentLocks[deviceId] !== vtu) {
+              playErrorSound();
+              setScannerError(`\ud83d\udea8 PROXY BLOCKED: Phone locked to ${currentLocks[deviceId]}`);
+              setTimeout(() => setScannerError(''), 3500);
+              return;
+            }
+
+            // Lock the device to this VTU if it's new
+            if (!currentLocks[deviceId]) {
+              currentLocks[deviceId] = vtu;
+              localStorage.setItem('uba_emergency_locks', JSON.stringify(currentLocks));
+              setEmergencyDeviceLocks(currentLocks);
+            }
           }
 
           // --- ROSTER SCANNING MODE INTERCEPTION ---
@@ -316,7 +376,8 @@ export default function CoordinatorPage() {
           if (isOfflineMode) {
               const newScan = { 
                 meetingId: meetingIdToUse, action: 'add', vtu: vtu, isOverride: false, enteredBy: auth.currentUser?.email,
-                studentName: `Scanned: ${vtu}`, timestamp: Date.now(), dateString: new Date().toLocaleString(), vtuNumber: vtu, phaseId: phaseIdToUse 
+                studentName: `Scanned: ${vtu}`, timestamp: Date.now(), dateString: new Date().toLocaleString(), vtuNumber: vtu, phaseId: phaseIdToUse,
+                ...(isEmergency ? { isEmergency: true, emergencyDeviceId: deviceId } : {})
               };
               const updated = [...localOfflineScansRef.current, newScan];
               setLocalOfflineScans(updated);
@@ -742,6 +803,30 @@ export default function CoordinatorPage() {
                   <span>Start Field Event</span>
                 )}
               </button>
+              {isOfflineMode && (
+                <button 
+                  onClick={() => {
+                    if (!newTitle.trim()) return showToast("Enter a meeting title!");
+                    const mockMeeting = { 
+                      id: 'EMG_' + Date.now(), 
+                      title: '[EMERGENCY] ' + newTitle, 
+                      status: 'active', 
+                      type: meetingMode, 
+                      attendanceActive: true, 
+                      coordinatorId: auth.currentUser?.email || 'Offline Coord',
+                      isEmergency: true
+                    };
+                    setMeetings(prev => [mockMeeting, ...prev]);
+                    setSelectedMeetingId(mockMeeting.id);
+                    setNewTitle('');
+                    setIsEmergencyMode(true);
+                    showToast("Emergency Local Session Started!");
+                  }}
+                  className="w-full mt-3 bg-red-600 text-white font-black py-4 rounded-xl shadow-xl transition tracking-[0.2em] uppercase text-xs hover:bg-red-700"
+                >
+                  🚨 Start Emergency Event
+                </button>
+              )}
             </div>
 
             {/* OFFLINE SYNC TOOL */}
