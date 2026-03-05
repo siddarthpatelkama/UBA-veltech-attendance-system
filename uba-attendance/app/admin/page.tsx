@@ -36,6 +36,7 @@ const IST_FULL_OPTIONS: Intl.DateTimeFormatOptions = {
 export default function AdminPage() {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const sosFileInputRef = useRef<HTMLInputElement>(null);
   
   const [data, setData] = useState<any>({ meetings: [], attendance: [], users: [], suspiciousLogs: [], stats: {} });
   const [coordinators, setCoordinators] = useState<string[]>([]);
@@ -59,6 +60,7 @@ export default function AdminPage() {
   const [isPurging, setIsPurging] = useState(false);
   const [selectedPurgeYear, setSelectedPurgeYear] = useState('1');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isRestoringBackup, setIsRestoringBackup] = useState(false);
 
   const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://uba-veltech-attendance-backend-system.onrender.com";
 
@@ -82,19 +84,38 @@ export default function AdminPage() {
 
     const token = await auth.currentUser?.getIdToken();
     if (!token) return;
+
+    // CACHE-FIRST: Skip heavy roster fetch if we already have it locally
+    const cachedRoster = localStorage.getItem('uba_master_roster');
+    const hasRoster = cachedRoster && JSON.parse(cachedRoster).length > 0;
     
     try {
-      const [coordRes, reportRes] = await Promise.all([
+      const [coordRes, reportRes, emergencyRes] = await Promise.all([
         fetch(`${API_URL}/admin/list-coordinators`, { headers: { Authorization: `Bearer ${token}` } }),
-        fetch(`${API_URL}/admin/all-reports`, { headers: { Authorization: `Bearer ${token}` } })
+        fetch(`${API_URL}/admin/all-reports?skipRoster=${!!hasRoster}`, { headers: { Authorization: `Bearer ${token}` } }),
+        fetch(`${API_URL}/admin/emergency-reports`, { headers: { Authorization: `Bearer ${token}` } }).catch(() => null)
       ]);
       const coordData = await coordRes.json();
       const reportData = await reportRes.json();
-      
-      const meetingsList = reportData.meetings || [];
-      meetingsList.sort((a: any, b: any) => getSafeTime(b.createdAt) - getSafeTime(a.createdAt));
+      const emergencyData = emergencyRes && emergencyRes.ok ? await emergencyRes.json() : { meetings: [], attendance: [] };
 
-      const processedReportData = { ...reportData, meetings: meetingsList, suspiciousLogs: reportData.suspiciousLogs || [] };
+      // Tag emergency meetings with isSOS and merge
+      const sosMeetings = (emergencyData.meetings || []).map((m: any) => ({ ...m, isSOS: true, status: 'closed' }));
+      const sosAttendance = emergencyData.attendance || [];
+
+      const meetingsList = [...(reportData.meetings || []), ...sosMeetings];
+      meetingsList.sort((a: any, b: any) => getSafeTime(b.createdAt || b.endedAt || b.syncedAt) - getSafeTime(a.createdAt || a.endedAt || a.syncedAt));
+
+      const mergedAttendance = [...(reportData.attendance || []), ...sosAttendance];
+
+      const processedReportData = { ...reportData, meetings: meetingsList, attendance: mergedAttendance, suspiciousLogs: reportData.suspiciousLogs || [] };
+
+      // SMART MERGE: Use cached roster if backend skipped it
+      if (hasRoster && (!reportData.users || reportData.users.length === 0)) {
+        processedReportData.users = JSON.parse(cachedRoster!);
+      } else if (reportData.users && reportData.users.length > 0) {
+        localStorage.setItem('uba_master_roster', JSON.stringify(reportData.users));
+      }
 
       sessionStorage.setItem('uba_admin_last_fetch', now.toString());
       sessionStorage.setItem('uba_admin_cache', JSON.stringify({ coordinators: coordData.coordinators, reportData: processedReportData }));
@@ -125,16 +146,6 @@ export default function AdminPage() {
   }, []);
 
   const hasActiveMeeting = useMemo(() => (data.meetings || []).some((m: any) => m.status === 'active'), [data.meetings]);
-
-  useEffect(() => {
-    if (!hasActiveMeeting) return;
-    const pollInterval = setInterval(() => {
-      if (auth.currentUser && document.visibilityState === 'visible') {
-          fetchData(true); 
-      }
-    }, 90000); 
-    return () => clearInterval(pollInterval);
-  }, [hasActiveMeeting]);
 
   const showToast = (msg: string) => { setToastMsg(msg); setTimeout(() => setToastMsg(null), 3000); };
 
@@ -182,6 +193,55 @@ export default function AdminPage() {
       });
       if (res.ok) { fetchData(true); showToast("Session purged"); }
     } catch (e) { showToast("Network error during delete"); }
+  };
+
+  // SOS BACKUP FILE RESTORE — reads .txt backup and pushes to emergency-sync
+  const handleSOSFileUpload = (e: any) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setIsRestoringBackup(true);
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      try {
+        const content = evt.target?.result as string;
+        const parsed = JSON.parse(content);
+        const scans = parsed.scans || [];
+        const session = parsed.session;
+
+        if (scans.length === 0) { setIsRestoringBackup(false); return showToast('Backup file contains no scan data'); }
+
+        const sessions = session ? [{
+          meetingId: session.meetingId,
+          meetingTitle: session.meetingName || session.meetingTitle,
+          coordinatorEmail: session.coordinatorEmail,
+          endedAt: Date.now(),
+          scanCount: scans.length
+        }] : [];
+
+        const token = await auth.currentUser?.getIdToken();
+        if (!token) { setIsRestoringBackup(false); return showToast('Not authenticated'); }
+
+        const res = await fetch(`${API_URL}/meeting/emergency-sync`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ scans, sessions })
+        });
+
+        if (res.ok) {
+          showToast(`Restored ${scans.length} emergency scans to cloud!`);
+          fetchData(true);
+        } else {
+          const errData = await res.json().catch(() => ({}));
+          showToast(`Restore failed: ${errData.error || 'Server error'}`);
+        }
+      } catch (err) {
+        showToast('Invalid backup file format');
+      } finally {
+        setIsRestoringBackup(false);
+        if (sosFileInputRef.current) sosFileInputRef.current.value = '';
+      }
+    };
+    reader.readAsText(file);
   };
 
   const handleFileUpload = (e: any) => {
@@ -366,7 +426,9 @@ export default function AdminPage() {
   const getMeetingStats = (attendeesList: any[]) => {
     return attendeesList.reduce((acc: any, curr: any) => {
       // Find the user in the Master Roster (data.users)
-      const user = (data.users || []).find((u: any) => String(u.vtuNumber) === String(curr.vtuNumber));
+      // For emergency scans, vtu field is used instead of vtuNumber
+      const vtuKey = curr.vtuNumber || curr.vtu;
+      const user = (data.users || []).find((u: any) => String(u.vtuNumber) === String(vtuKey));
       
       // Use Master Roster data if available, otherwise fallback to temporary scan data
       const gen = String(user?.gender || curr.gender || 'Unknown').toUpperCase();
@@ -516,7 +578,7 @@ export default function AdminPage() {
           {/* STAT BOXES */}
           <div className="lg:col-span-12 grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
             <div className="p-6 rounded-3xl shadow-sm text-center border-b-4 border-[#FF5722] bg-white"><p className="text-[10px] font-black uppercase text-gray-400 mb-1 tracking-widest">Total Trips</p><p className="text-4xl font-black text-gray-900">{filteredMeetings.length}</p></div>
-            <div className="p-6 rounded-3xl shadow-sm text-center border-b-4 border-[#FF5722] bg-white"><p className="text-[10px] font-black uppercase text-gray-400 mb-1 tracking-widest">Total Scans</p><p className="text-4xl font-black text-gray-900">{(data.attendance || []).length}</p></div>
+            <div className="p-6 rounded-3xl shadow-sm text-center border-b-4 border-[#FF5722] bg-white"><p className="text-[10px] font-black uppercase text-gray-400 mb-1 tracking-widest">Total Scans</p><p className="text-4xl font-black text-gray-900">{(data.attendance || []).length}</p><p className="text-[8px] font-bold text-red-500 mt-1">{(data.attendance || []).filter((a:any) => a.isEmergency).length > 0 ? `incl. ${(data.attendance || []).filter((a:any) => a.isEmergency).length} SOS` : ''}</p></div>
             <div className="p-6 rounded-3xl shadow-sm text-center border-b-4 border-gray-900 bg-white"><p className="text-[10px] font-black uppercase text-gray-400 mb-1 tracking-widest">Members</p><p className="text-4xl font-black text-gray-900">{(data.users || []).length}</p></div>
             <div className="p-6 rounded-3xl shadow-sm text-center border-b-4 border-red-500 bg-red-50"><p className="text-[10px] font-black uppercase text-red-400 mb-1 tracking-widest italic">Security Flags</p><p className="text-4xl font-black text-red-600 animate-pulse">{(data.suspiciousLogs || []).length}</p></div>
           </div>
@@ -548,14 +610,15 @@ export default function AdminPage() {
               const tabMissing = manifest.filter((man: any) => !attendees.some((att: any) => String(att.vtuNumber) === String(man.vtu)));
 
               return (
-                <div key={m.id} className="p-6 md:p-8 rounded-[3rem] border border-[#FF5722] bg-white shadow-lg relative transition-all group hover:border-[#FF5722]">
+                <div key={m.id} className={`p-6 md:p-8 rounded-[3rem] shadow-lg relative transition-all group ${m.isSOS ? 'border-4 border-red-600 bg-red-50 hover:border-red-700' : 'border border-[#FF5722] bg-white hover:border-[#FF5722]'}`}>
                   <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-6 gap-4">
                      <div>
                        <div className="flex items-center gap-3">
-                         <h3 className="font-black text-2xl uppercase italic tracking-tighter text-gray-900">{m.title}</h3>
-                         {m.status === 'active' && <span className="bg-[#FF5722] text-white text-[8px] font-black px-2 py-0.5 rounded animate-pulse uppercase tracking-widest">Live Now</span>}
+                         <h3 className="font-black text-2xl uppercase italic tracking-tighter text-gray-900">{m.isSOS ? `🚨 ${m.title || m.meetingTitle}` : m.title}</h3>
+                         {m.status === 'active' && !m.isSOS && <span className="bg-[#FF5722] text-white text-[8px] font-black px-2 py-0.5 rounded animate-pulse uppercase tracking-widest">Live Now</span>}
+                         {m.isSOS && <span className="bg-red-600 text-white text-[8px] font-black px-2 py-1 rounded uppercase tracking-widest animate-pulse">SOS</span>}
                        </div>
-                       <p className="text-[10px] font-bold text-gray-400 mt-1 uppercase tracking-widest">Host: {m.createdByName || m.coordinatorId}</p>
+                       <p className="text-[10px] font-bold text-gray-400 mt-1 uppercase tracking-widest">{m.isSOS ? `🚨 EMERGENCY SESSION BY: ${m.coordinatorEmail || m.syncedBy || 'Unknown'}` : `Host: ${m.createdByName || m.coordinatorId}`}</p>
                      </div>
                      <div className="flex flex-wrap gap-2 w-full lg:w-auto">
                        <button onClick={() => setAnalyticsViewMap({...analyticsViewMap, [m.id]: !isAnalytics})} className={`flex-1 lg:flex-none px-4 py-3 rounded-xl text-[9px] font-black border transition uppercase shadow-sm tracking-widest ${isAnalytics ? 'bg-gray-900 text-white' : 'text-[#FF5722] border-[#FF5722] bg-[#FFF9F5]'}`}>{isAnalytics ? 'Close Analytics' : 'Analytics'}</button>
@@ -752,6 +815,16 @@ export default function AdminPage() {
                   <option value="1">Year 1</option><option value="2">Year 2</option><option value="3">Year 3</option><option value="4">Year 4</option>
                 </select>
                 <button onClick={handleYearPurge} className="flex-1 bg-white border border-red-100 text-red-500 font-black rounded-xl text-[10px] uppercase tracking-widest hover:bg-red-500 hover:text-white transition-colors shadow-sm">Purge Year</button>
+              </div>
+
+              {/* SOS BACKUP RESTORE */}
+              <div className="mt-6 pt-6 border-t-2 border-red-100">
+                <h3 className="font-black mb-3 uppercase text-[10px] tracking-[0.2em] text-red-500 flex items-center gap-2"><span className="text-lg">🚨</span> Emergency Recovery</h3>
+                <div className="relative w-full border-2 border-dashed border-red-300 bg-red-50 rounded-2xl p-6 text-center hover:bg-red-100 hover:border-red-400 transition-colors cursor-pointer group">
+                  <p className="text-[10px] font-black text-red-600 uppercase tracking-widest group-hover:scale-105 transition-transform">{isRestoringBackup ? 'Restoring SOS Data...' : '📤 Restore from SOS Backup (.txt)'}</p>
+                  <p className="text-[8px] font-bold text-red-400 mt-1 uppercase tracking-widest">Upload a UBA_EMERGENCY_BACKUP file from coordinator's phone</p>
+                  <input type="file" ref={sosFileInputRef} onChange={handleSOSFileUpload} accept=".txt" className="absolute inset-0 opacity-0 cursor-pointer" />
+                </div>
               </div>
             </div>
 

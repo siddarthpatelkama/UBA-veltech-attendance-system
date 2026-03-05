@@ -13,29 +13,154 @@ export default function EmergencyCoord() {
   const [scannerError, setScannerError] = useState('');
   const [scannerSuccess, setScannerSuccess] = useState('');
   const [deviceLocks, setDeviceLocks] = useState<Record<string, string>>({});
+  const [isResumed, setIsResumed] = useState(false);
+  const [manualVtu, setManualVtu] = useState('');
+  const scanCountRef = useRef(0);
 
-  const STATIC_PASS = 'UBA-RESCUE'; // Hardcoded Emergency Password
+  const STATIC_PASS = 'UBA-RESCUE';
 
+  // LAYER 1: AUTO-RESUME — Check for a persisted active session on mount
   useEffect(() => {
     const savedLocks = localStorage.getItem('uba_emergency_locks');
     if (savedLocks) setDeviceLocks(JSON.parse(savedLocks));
 
-    const savedVault = localStorage.getItem('uba_offline_vault');
-    if (savedVault) setScans(JSON.parse(savedVault).filter((s: any) => s.isEmergency));
+    const savedSession = localStorage.getItem('uba_active_emergency_session');
+    if (savedSession) {
+      try {
+        const session = JSON.parse(savedSession);
+        setMeetingId(session.id);
+        setMeetingName(session.title);
+        setEmail(session.coordinatorEmail || '');
+        setIsAuthenticated(true);
+        setIsResumed(true);
+      } catch (e) {
+        localStorage.removeItem('uba_active_emergency_session');
+      }
+    }
   }, []);
 
+  // LAYER 3: UI CONTINUITY — Always pull scans from vault filtered by active meeting
+  useEffect(() => {
+    if (!meetingId) return;
+    const savedVault = localStorage.getItem('uba_offline_vault');
+    if (savedVault) {
+      const allScans = JSON.parse(savedVault);
+      setScans(allScans.filter((s: any) => s.isEmergency && s.meetingId === meetingId));
+    }
+  }, [meetingId]);
+
+  // LAYER 1: SESSION PERSISTENCE — Hard-lock session to disk on start
   const handleLogin = () => {
     if (password !== STATIC_PASS) return alert("Invalid Emergency Passcode");
     if (!email.includes('@') || !meetingName) return alert("Email and Meeting Name required");
-    setMeetingId('EMG_' + Date.now());
+    const newId = 'EMG_' + Date.now();
+    const mockMeeting = {
+      id: newId,
+      title: meetingName,
+      coordinatorEmail: email,
+      createdAt: Date.now(),
+      isEmergency: true
+    };
+    localStorage.setItem('uba_active_emergency_session', JSON.stringify(mockMeeting));
+    setMeetingId(newId);
     setIsAuthenticated(true);
   };
 
+  // LAYER 2: END & LOCK — Move to unsynced vault, clear active session
+  const handleEndSession = () => {
+    if (!confirm('End this emergency session? Scans will be queued for cloud sync.')) return;
+
+    // Move session metadata to unsynced vault
+    const unsyncedVault = JSON.parse(localStorage.getItem('uba_unsynced_vault') || '[]');
+    const sessionData = {
+      meetingId,
+      meetingTitle: meetingName,
+      coordinatorEmail: email,
+      endedAt: Date.now(),
+      scanCount: scans.length
+    };
+    unsyncedVault.push(sessionData);
+    localStorage.setItem('uba_unsynced_vault', JSON.stringify(unsyncedVault));
+
+    // Clear active session key — next open will show login
+    localStorage.removeItem('uba_active_emergency_session');
+
+    // Reset UI state
+    setIsAuthenticated(false);
+    setMeetingId('');
+    setMeetingName('');
+    setEmail('');
+    setPassword('');
+    setScans([]);
+    setIsResumed(false);
+    alert('Session ended. Scans saved in Vault. Log in normally to sync to cloud.');
+  };
+
+  // BULK MANUAL ENTRY — space-separated VTUs
+  const handleManualAdd = () => {
+    const vtus = manualVtu.trim().split(/[\s,]+/).filter(v => v.length > 0);
+    if (vtus.length === 0) return alert('Enter at least one VTU number');
+
+    const vault = JSON.parse(localStorage.getItem('uba_offline_vault') || '[]');
+    let added = 0;
+
+    vtus.forEach(vtu => {
+      const upperVtu = vtu.toUpperCase();
+      if (vault.some((s: any) => s.vtu === upperVtu && s.meetingId === meetingId)) return; // skip dupes
+      const newScan = {
+        meetingId, meetingTitle: meetingName, action: 'add', vtu: upperVtu,
+        studentName: `Manual: ${upperVtu}`, timestamp: Date.now(),
+        isOverride: true, enteredBy: email, isEmergency: true, emergencyDeviceId: 'MANUAL'
+      };
+      vault.push(newScan);
+      added++;
+    });
+
+    localStorage.setItem('uba_offline_vault', JSON.stringify(vault));
+    const updatedScans = vault.filter((s: any) => s.isEmergency && s.meetingId === meetingId);
+    setScans(updatedScans);
+    setManualVtu('');
+    if (added > 0) {
+      setScannerSuccess(`${added} VTU(s) added manually`); setTimeout(() => setScannerSuccess(''), 2000);
+      checkAutoBackup(updatedScans.length);
+    }
+    else { setScannerError('All entries already exist'); setTimeout(() => setScannerError(''), 2000); }
+  };
+
+  // BACKUP TO FILE — download full vault as .txt
+  const handleBackupToFile = () => {
+    const allVault = JSON.parse(localStorage.getItem('uba_offline_vault') || '[]');
+    const sessionScans = allVault.filter((s: any) => s.isEmergency && s.meetingId === meetingId);
+    const backupData = {
+      session: { meetingId, meetingName, coordinatorEmail: email, exportedAt: new Date().toISOString() },
+      scans: sessionScans
+    };
+    const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `UBA_EMERGENCY_BACKUP_${Date.now()}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // AUTO-BACKUP: trigger file download every 20 scans
+  const checkAutoBackup = (currentCount: number) => {
+    scanCountRef.current = currentCount;
+    if (currentCount > 0 && currentCount % 20 === 0) {
+      handleBackupToFile();
+    }
+  };
+
+  // Scanner with forced back camera
   useEffect(() => {
-    if (!isAuthenticated) return;
+    if (!isAuthenticated || !meetingId) return;
     let scanner: any;
     import('html5-qrcode').then(({ Html5QrcodeScanner }) => {
-      scanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: { width: 250, height: 250 } }, false);
+      scanner = new Html5QrcodeScanner("reader", {
+        fps: 10, qrbox: { width: 250, height: 250 },
+        videoConstraints: { facingMode: { exact: "environment" } }
+      }, false);
       scanner.render((decodedText: string) => {
         try {
           const payload = JSON.parse(atob(decodedText));
@@ -70,9 +195,11 @@ export default function EmergencyCoord() {
 
           const updatedVault = [...vault, newScan];
           localStorage.setItem('uba_offline_vault', JSON.stringify(updatedVault));
-          setScans(prev => [newScan, ...prev]);
+          const currentSessionScans = updatedVault.filter((s: any) => s.isEmergency && s.meetingId === meetingId);
+          setScans(currentSessionScans);
           setScannerSuccess(`${vtu} SAVED LOCALLY`);
           setTimeout(() => setScannerSuccess(''), 1500);
+          checkAutoBackup(currentSessionScans.length);
         } catch (e) { setScannerError("Invalid QR Format"); setTimeout(() => setScannerError(''), 2000); }
       }, () => {});
     });
@@ -127,6 +254,7 @@ export default function EmergencyCoord() {
           <h1 className="text-2xl font-black italic">🚨 EMERGENCY MODE</h1>
           <p className="text-[10px] font-bold text-red-400 uppercase tracking-widest mt-1">{meetingName} — {email}</p>
           <p className="text-[9px] font-mono text-gray-500 mt-1">Session: {meetingId}</p>
+          {isResumed && <p className="text-[9px] font-black text-green-400 uppercase tracking-widest mt-2 animate-pulse">♻️ SESSION RESTORED FROM DISK</p>}
         </div>
 
         <div className="bg-white p-4 rounded-3xl shadow-xl mb-6 relative">
@@ -135,7 +263,26 @@ export default function EmergencyCoord() {
           {scannerError && <div className="absolute top-8 left-8 right-8 bg-red-600 text-white font-black p-3 text-center rounded-xl animate-bounce z-20">🚨 {scannerError}</div>}
         </div>
 
-        <div className="bg-gray-800 p-6 rounded-3xl">
+        <div className="bg-gray-800 p-6 rounded-3xl mb-6">
+          <h3 className="font-black text-xs text-gray-400 uppercase tracking-widest mb-4 border-b border-gray-700 pb-2">Bulk Manual Entry</h3>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={manualVtu}
+              onChange={(e) => setManualVtu(e.target.value)}
+              placeholder="VTU numbers (space-separated)"
+              className="flex-1 p-3 rounded-xl text-sm font-mono font-bold bg-gray-900 border border-gray-700 text-white outline-none placeholder-gray-500"
+            />
+            <button
+              onClick={handleManualAdd}
+              className="bg-[#FF5722] text-white px-5 py-3 rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-[#E64A19] active:scale-95 transition-all whitespace-nowrap"
+            >
+              Add VTUs
+            </button>
+          </div>
+        </div>
+
+        <div className="bg-gray-800 p-6 rounded-3xl mb-6">
           <h3 className="font-black text-xs text-gray-400 uppercase tracking-widest mb-4 border-b border-gray-700 pb-2">Vault Memory ({scans.length})</h3>
           <div className="space-y-2 max-h-60 overflow-y-auto pr-2 custom-scrollbar">
             {scans.map((s, i) => (
@@ -144,8 +291,26 @@ export default function EmergencyCoord() {
                 <span className="text-[10px] text-gray-500 font-bold">{new Date(s.timestamp).toLocaleTimeString()}</span>
               </div>
             ))}
+            {scans.length === 0 && <p className="text-center text-gray-500 text-xs font-bold py-4 italic">No scans yet. Point camera at Student Emergency QR.</p>}
           </div>
         </div>
+
+        <div className="flex gap-3 mb-4">
+          <button
+            onClick={handleBackupToFile}
+            className="flex-1 bg-gray-700 text-white font-black py-4 rounded-2xl shadow-xl uppercase tracking-widest text-[10px] hover:bg-gray-600 active:scale-95 transition-all"
+          >
+            📥 Backup Vault to Phone
+          </button>
+        </div>
+
+        <button
+          onClick={handleEndSession}
+          className="w-full bg-red-600 text-white font-black py-4 rounded-2xl shadow-xl uppercase tracking-widest text-xs hover:bg-red-700 active:scale-95 transition-all"
+        >
+          🛑 End Emergency Session
+        </button>
+        <p className="text-[8px] text-center mt-3 text-gray-500 font-bold uppercase tracking-widest">Scans will be queued for cloud sync on next login</p>
       </div>
     </div>
   );

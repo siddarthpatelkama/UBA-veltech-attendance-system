@@ -45,6 +45,9 @@ export default function CoordinatorPage() {
   const [isEmergencyMode, setIsEmergencyMode] = useState(false);
   const [emergencyDeviceLocks, setEmergencyDeviceLocks] = useState<Record<string, string>>({});
   
+  const [unsyncedEmergencyData, setUnsyncedEmergencyData] = useState<any[]>([]);
+  const [isDumping, setIsDumping] = useState(false);
+
   const [showScanner, setShowScanner] = useState(false);
   const [scannerError, setScannerError] = useState('');
   const [scannerSuccess, setScannerSuccess] = useState('');
@@ -59,6 +62,7 @@ export default function CoordinatorPage() {
   const [isCreating, setIsCreating] = useState(false);
   const [creationStatus, setCreationStatus] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isRestoringBackup, setIsRestoringBackup] = useState(false);
 
   // --- SCAN TO ROSTER STATES ---
   const [isScanningRoster, setIsScanningRoster] = useState(false);
@@ -71,6 +75,7 @@ export default function CoordinatorPage() {
   const [statusMsg, setStatusMsg] = useState('');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const sosFileInputRef = useRef<HTMLInputElement>(null);
 
   const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://uba-veltech-attendance-backend-system.onrender.com";
   const FRONTEND_URL = process.env.NEXT_PUBLIC_FRONTEND_URL || "https://uba-veltech-attendance-system.vercel.app"; 
@@ -107,11 +112,25 @@ export default function CoordinatorPage() {
 
     fetchMyProfile(token); 
 
+    // CACHE-FIRST: Skip heavy roster fetch if we already have it locally
+    const cachedRoster = localStorage.getItem('uba_master_roster');
+    const hasRoster = cachedRoster && JSON.parse(cachedRoster).length > 0;
+
     try {
-      const res = await fetch(`${API_URL}/meetings`, { headers: { Authorization: `Bearer ${token}` } });
+      const [res, emergencyRes] = await Promise.all([
+        fetch(`${API_URL}/meetings?skipRoster=${!!hasRoster}`, { headers: { Authorization: `Bearer ${token}` } }),
+        fetch(`${API_URL}/admin/emergency-reports`, { headers: { Authorization: `Bearer ${token}` } }).catch(() => null)
+      ]);
       const data = await res.json();
+      const emergencyData = emergencyRes && emergencyRes.ok ? await emergencyRes.json() : { meetings: [], attendance: [] };
+
       if (res.ok) {
-        const processedMeetings = data.meetings.map((m: any) => {
+        // Tag emergency meetings with isSOS
+        const sosMeetings = (emergencyData.meetings || []).map((m: any) => ({ ...m, isSOS: true, status: 'closed' }));
+        const sosAttendance = emergencyData.attendance || [];
+
+        const processedMeetings = [...data.meetings, ...sosMeetings].map((m: any) => {
+          if (m.isSOS) return m; // Emergency meetings don't expire
           const createdAtTime = getSafeTime(m.createdAt, Date.now());
           const expiresAt = createdAtTime + 1800000; // 30 minutes in milliseconds
           
@@ -122,16 +141,19 @@ export default function CoordinatorPage() {
           return { ...m, calculatedExpiresAt: expiresAt };
         });
 
-        processedMeetings.sort((a: any, b: any) => getSafeTime(b.createdAt, 0) - getSafeTime(a.createdAt, 0));
+        processedMeetings.sort((a: any, b: any) => getSafeTime(b.createdAt || b.endedAt || b.syncedAt, 0) - getSafeTime(a.createdAt || a.endedAt || a.syncedAt, 0));
 
         setMeetings(processedMeetings);
-        setAttendance(data.attendance || []);
+        setAttendance([...(data.attendance || []), ...sosAttendance]);
         setSuspiciousLogs(data.suspiciousLogs || []);
-        setUsers(data.users || []);
 
-        if (data.users) {
-           localStorage.setItem('uba_users_cache', JSON.stringify(data.users));
-           localStorage.setItem('uba_master_roster', JSON.stringify(data.users));
+        // SMART MERGE: Use cached roster if backend skipped it
+        if (hasRoster && (!data.users || data.users.length === 0)) {
+          setUsers(JSON.parse(cachedRoster!));
+        } else if (data.users && data.users.length > 0) {
+          setUsers(data.users);
+          localStorage.setItem('uba_users_cache', JSON.stringify(data.users));
+          localStorage.setItem('uba_master_roster', JSON.stringify(data.users));
         }
 
         if (forceSelectLatest && processedMeetings.length > 0) {
@@ -159,6 +181,15 @@ export default function CoordinatorPage() {
 
     const savedLocks = localStorage.getItem('uba_emergency_locks');
     if (savedLocks) setEmergencyDeviceLocks(JSON.parse(savedLocks));
+
+    // LAYER: Detect unsynced emergency data from Emergency Portal
+    const unsyncedRaw = localStorage.getItem('uba_unsynced_vault');
+    if (unsyncedRaw) {
+      try {
+        const parsed = JSON.parse(unsyncedRaw);
+        if (Array.isArray(parsed) && parsed.length > 0) setUnsyncedEmergencyData(parsed);
+      } catch (e) {}
+    }
 
     return () => unsub();
   }, []);
@@ -199,16 +230,6 @@ export default function CoordinatorPage() {
   }, [isOfflineMode]);
 
   const hasActiveMeeting = useMemo(() => (meetings || []).some(m => m.status === 'active'), [meetings]);
-
-  useEffect(() => {
-    if (isOfflineMode || !hasActiveMeeting) return;
-    const pollInterval = setInterval(() => {
-      if (auth.currentUser && document.visibilityState === 'visible') {
-        fetchData(false);
-      }
-    }, 90000); 
-    return () => clearInterval(pollInterval);
-  }, [hasActiveMeeting, isOfflineMode]);
 
   useEffect(() => {
     const hour = new Date().getHours();
@@ -295,7 +316,7 @@ export default function CoordinatorPage() {
     const phaseIdToUse = activePhase ? activePhase.id : 'none';
 
     import('html5-qrcode').then(({ Html5QrcodeScanner }) => {
-      scanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: { width: 250, height: 250 }, videoConstraints: { facingMode: { exact: "environment" } } }, false);
+      scanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: { width: 250, height: 250 }, videoConstraints: { facingMode: "environment" } }, false);
       
       scanner.render((decodedText: string) => {
         if (document.getElementById('scanner-overlay-active')) return;
@@ -652,7 +673,7 @@ export default function CoordinatorPage() {
   const myEmail = auth.currentUser?.email || '';
   const myNameRaw = myEmail.split('@')[0].replace(/\D/g, ''); 
   const currentUserData = myProfile || users.find(u => u.vtuNumber === myNameRaw) || {};
-  const myMeetings = (meetings || []).filter(m => m.coordinatorId === myEmail);
+  const myMeetings = (meetings || []).filter(m => m.coordinatorId === myEmail || (m.isSOS && m.coordinatorEmail === myEmail));
   const myTotalMeetings = myMeetings.length;
   const myTotalStudents = (attendance || []).filter(a => myMeetings.some(m => m.id === a.meetingId)).length;
 
@@ -700,6 +721,120 @@ export default function CoordinatorPage() {
       return;
     }
     signOut(auth);
+  };
+
+  // EMERGENCY DATA DUMP — pushes unsynced emergency sessions to cloud
+  const handleEmergencyDataDump = async () => {
+    if (isDumping) return;
+    setIsDumping(true);
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      if (!token) { alert('Not authenticated. Please log in first.'); setIsDumping(false); return; }
+
+      const vaultRaw = localStorage.getItem('uba_offline_vault');
+      const allScans = vaultRaw ? JSON.parse(vaultRaw) : [];
+      const emergencyScans = allScans.filter((s: any) => s.isEmergency);
+
+      const res = await fetch(`${API_URL}/meeting/emergency-sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ scans: emergencyScans, sessions: unsyncedEmergencyData })
+      });
+
+      if (res.ok) {
+        // Only clear on confirmed 200
+        localStorage.removeItem('uba_unsynced_vault');
+        // Remove emergency scans from offline vault, keep standard ones
+        const remainingScans = allScans.filter((s: any) => !s.isEmergency);
+        if (remainingScans.length > 0) {
+          localStorage.setItem('uba_offline_vault', JSON.stringify(remainingScans));
+        } else {
+          localStorage.removeItem('uba_offline_vault');
+        }
+        setUnsyncedEmergencyData([]);
+        setLocalOfflineScans(remainingScans);
+        showToast('Emergency data synced to cloud!');
+        fetchData(true);
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        alert(`Sync failed (${res.status}): ${errData.error || 'Server rejected the data. Try again.'}`);
+      }
+    } catch (e) {
+      alert('Network error. Check your connection and try again.');
+    } finally {
+      setIsDumping(false);
+    }
+  };
+
+  // SOS BACKUP FILE RESTORE — reads .txt backup and pushes to emergency-sync
+  const handleSOSFileUpload = (e: any) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setIsRestoringBackup(true);
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      try {
+        const content = evt.target?.result as string;
+        const parsed = JSON.parse(content);
+
+        // Validate it's a real UBA backup
+        if (!parsed.session || !parsed.session.meetingId || (!parsed.scans && !parsed.students)) {
+          alert('Invalid SOS Backup File. Must be a UBA_EMERGENCY_BACKUP .txt');
+          setIsRestoringBackup(false);
+          return;
+        }
+
+        // Map students (legacy format) into standard scans format if needed
+        let scans = parsed.scans || [];
+        if (scans.length === 0 && parsed.students) {
+          scans = parsed.students.map((s: any) => ({
+            meetingId: parsed.session.meetingId,
+            meetingTitle: parsed.session.meetingName || parsed.session.meetingTitle,
+            action: 'add',
+            vtu: s.vtu,
+            studentName: `Restored: ${s.vtu}`,
+            timestamp: s.timestamp || Date.now(),
+            isOverride: true,
+            enteredBy: parsed.session.coordinatorEmail || myEmail,
+            isEmergency: true,
+            emergencyDeviceId: 'FILE_RESTORE'
+          }));
+        }
+
+        if (scans.length === 0) { alert('Backup file contains no scan data'); setIsRestoringBackup(false); return; }
+
+        const sessions = [{
+          meetingId: parsed.session.meetingId,
+          meetingTitle: parsed.session.meetingName || parsed.session.meetingTitle,
+          coordinatorEmail: parsed.session.coordinatorEmail,
+          endedAt: Date.now(),
+          scanCount: scans.length
+        }];
+
+        const token = await auth.currentUser?.getIdToken();
+        if (!token) { alert('Not authenticated'); setIsRestoringBackup(false); return; }
+
+        const res = await fetch(`${API_URL}/meeting/emergency-sync`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ scans, sessions })
+        });
+
+        if (res.ok) {
+          showToast(`Restored ${scans.length} emergency scans to cloud!`);
+          fetchData(true);
+        } else {
+          const errData = await res.json().catch(() => ({}));
+          alert(`Restore failed: ${errData.error || 'Server error'}`);
+        }
+      } catch (err) {
+        alert('Invalid SOS Backup File.');
+      } finally {
+        setIsRestoringBackup(false);
+        if (sosFileInputRef.current) sosFileInputRef.current.value = '';
+      }
+    };
+    reader.readAsText(file);
   };
 
   return (
@@ -774,6 +909,25 @@ export default function CoordinatorPage() {
 
         <main className="max-w-7xl mx-auto p-4 md:p-6 mt-4 flex flex-col lg:grid lg:grid-cols-12 gap-8">
           
+          {/* EMERGENCY RECOVERY BANNER */}
+          {unsyncedEmergencyData.length > 0 && (
+            <div className="lg:col-span-12 bg-red-50 border-2 border-red-500 p-6 rounded-[2rem] shadow-lg flex flex-col md:flex-row items-center justify-between gap-4 animate-pulse">
+               <div>
+                 <p className="text-red-600 font-black text-sm uppercase tracking-widest flex items-center gap-2"><span>⚠️</span> UNSYNCED EMERGENCY DATA DETECTED ({unsyncedEmergencyData.reduce((sum: number, s: any) => sum + (s.scanCount || 0), 0)} students)</p>
+                 <p className="text-red-500 text-[10px] font-bold mt-1 uppercase tracking-widest">{unsyncedEmergencyData.length} emergency session(s) waiting for cloud sync. Do NOT clear browser data.</p>
+               </div>
+               <button
+                 onClick={handleEmergencyDataDump}
+                 disabled={isDumping}
+                 className={`w-full md:w-auto px-8 py-4 rounded-xl font-black text-[10px] uppercase shadow-lg transition-all whitespace-nowrap ${
+                   isDumping ? 'bg-gray-400 text-white cursor-wait' : 'bg-red-600 text-white hover:bg-red-700 active:scale-95'
+                 }`}
+               >
+                 {isDumping ? 'SYNCING...' : 'DUMP TO CLOUD'}
+               </button>
+            </div>
+          )}
+
           {/* LOW NETWORK BANNER */}
           {showLowNetworkWarning && !isOfflineMode && (
             <div className="lg:col-span-12 bg-yellow-50 border-2 border-yellow-400 p-6 rounded-[2rem] shadow-sm flex flex-col md:flex-row items-center justify-between gap-4 animate-in slide-in-from-top-4">
@@ -1177,6 +1331,16 @@ export default function CoordinatorPage() {
                 </div>
               )}
             </div>
+
+            {/* SOS RECOVERY TOOL */}
+            <div className="p-6 rounded-3xl shadow-sm border-2 border-red-200 bg-white">
+              <h2 className="font-black text-sm uppercase mb-4 text-red-500 flex items-center gap-2"><span>🆘</span> SOS Recovery</h2>
+              <div className="relative w-full border-2 border-dashed border-red-300 bg-red-50 rounded-2xl p-6 text-center hover:bg-red-100 hover:border-red-400 transition-colors cursor-pointer group">
+                <p className="text-[10px] font-black text-red-600 uppercase tracking-widest group-hover:scale-105 transition-transform">{isRestoringBackup ? 'Restoring SOS Data...' : '📤 Restore from Phone Backup'}</p>
+                <p className="text-[8px] font-bold text-red-400 mt-1 uppercase tracking-widest">Upload a UBA_EMERGENCY_BACKUP .txt file</p>
+                <input type="file" ref={sosFileInputRef} onChange={handleSOSFileUpload} accept=".txt" className="absolute inset-0 opacity-0 cursor-pointer" />
+              </div>
+            </div>
           </div>
 
           {/* RIGHT BOTTOM COLUMN: GLOBAL HISTORY */}
@@ -1197,14 +1361,14 @@ export default function CoordinatorPage() {
                   const isSelected = displayId === m.id;
                   const dateStr = getSafeTime(m.createdAt) ? new Date(getSafeTime(m.createdAt)).toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'}) : 'Recent';
                   return (
-                    <div key={m.id} onClick={() => setSelectedMeetingId(m.id)} className={`p-5 rounded-2xl border-2 cursor-pointer transition-all ${isSelected ? `bg-[#111827] border-[#FF5722] shadow-xl scale-105` : `border-gray-50 hover:border-[#FF5722]/40 bg-[#FFF9F5]/30`}`}>
+                    <div key={m.id} onClick={() => setSelectedMeetingId(m.id)} className={`p-5 rounded-2xl cursor-pointer transition-all ${m.isSOS ? `border-4 border-red-600 bg-red-50 ${isSelected ? 'shadow-xl scale-105' : 'hover:border-red-400'}` : isSelected ? `bg-[#111827] border-2 border-[#FF5722] shadow-xl scale-105` : `border-2 border-gray-50 hover:border-[#FF5722]/40 bg-[#FFF9F5]/30`}`}>
                       <div className="flex justify-between items-start">
-                        <p className={`font-black text-sm capitalize truncate w-32 ${isSelected ? 'text-white' : 'text-gray-900'}`}>{m.title}</p>
-                        <span className={`text-[8px] px-2 py-1 rounded font-black tracking-widest ${m.status === 'active' ? 'bg-[#FF5722] text-white animate-pulse' : (isSelected ? 'text-gray-400' : 'text-gray-300')}`}>
-                           {m.status === 'active' ? 'LIVE' : 'CLOSED'}
+                        <p className={`font-black text-sm capitalize truncate w-32 ${m.isSOS ? 'text-red-700' : isSelected ? 'text-white' : 'text-gray-900'}`}>{m.isSOS ? `🚨 ${m.title || m.meetingTitle}` : m.title}</p>
+                        <span className={`text-[8px] px-2 py-1 rounded font-black tracking-widest ${m.isSOS ? 'bg-red-600 text-white animate-pulse' : m.status === 'active' ? 'bg-[#FF5722] text-white animate-pulse' : (isSelected ? 'text-gray-400' : 'text-gray-300')}`}>
+                           {m.isSOS ? 'SOS' : m.status === 'active' ? 'LIVE' : 'CLOSED'}
                         </span>
                       </div>
-                      <p className={`text-[9px] font-bold uppercase mt-2 ${isSelected ? 'text-gray-400' : 'text-gray-500'}`}>Host: {m.createdByName || 'Coord'}</p>
+                      <p className={`text-[9px] font-bold uppercase mt-2 ${m.isSOS ? 'text-red-500' : isSelected ? 'text-gray-400' : 'text-gray-500'}`}>{m.isSOS ? `🚨 EMERGENCY SESSION BY: ${m.coordinatorEmail || 'Unknown'}` : `Host: ${m.createdByName || 'Coord'}`}</p>
                       <p className="text-[9px] font-black mt-1 text-[#FF5722] tracking-tighter italic">{dateStr}</p>
                     </div>
                   );

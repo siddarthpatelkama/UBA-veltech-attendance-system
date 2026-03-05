@@ -472,7 +472,7 @@ export default function HomePage() {
         {activeView === 'history' && (
           <div className="space-y-8 animate-in slide-in-from-right-8">
              <div className="flex justify-between items-end border-b-2 border-gray-100 pb-6">
-                <h2 className="text-4xl font-black uppercase italic tracking-tighter">My Scans</h2>
+                <h2 className="text-4xl font-black uppercase italic tracking-tighter">My contibution</h2>
                 <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">{history.length} Entries</p>
              </div>
              <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
