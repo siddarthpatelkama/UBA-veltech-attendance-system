@@ -39,6 +39,9 @@ router.post("/meeting/close-phase", verifyToken, meetingController.closePhase);
 // Endpoint to receive bulk offline scans when Student Coordinators return to Wi-Fi
 router.post("/meeting/offline-sync", verifyToken, meetingController.syncOfflineAttendance);
 
+// Emergency Portal batch dump — routes to emergency_meetings & emergency_attendance
+router.post("/meeting/emergency-sync", verifyToken, meetingController.syncEmergencyData);
+
 // --- ATTENDANCE ---
 router.post("/mark-attendance", verifyToken, attendanceController.markAttendance);
 
@@ -47,6 +50,7 @@ router.get("/admin/list-coordinators", verifyToken, adminController.listCoordina
 router.post("/admin/add-coordinator", verifyToken, adminController.addCoordinator);
 router.post("/admin/remove-coordinator", verifyToken, adminController.removeCoordinator);
 router.get("/admin/all-reports", verifyToken, adminController.getAllReports);
+router.get("/admin/emergency-reports", verifyToken, adminController.getEmergencyReports);
 router.post("/admin/delete-meeting", verifyToken, adminController.deleteMeeting); 
 
 // NEW: Endpoint for Resetting Student Device Binding

@@ -216,12 +216,20 @@ exports.listCoordinators = async (req, res) => {
 exports.getAllReports = async (req, res) => {
   if (req.user.role !== "head") return res.status(403).send();
   try {
-    const [meetingsSnap, attendanceSnap, usersSnap, suspSnap] = await Promise.all([
+    const skipRoster = req.query.skipRoster === 'true';
+
+    const baseFetches = [
       db.collection("meetings").get(),
       db.collection("attendance").get(),
-      db.collection("users").get(),
-      db.collection("suspiciousLogs").get() 
-    ]);
+      db.collection("suspiciousLogs").get()
+    ];
+
+    // Only fetch users collection if roster is needed
+    if (!skipRoster) baseFetches.push(db.collection("users").get());
+
+    const results = await Promise.all(baseFetches);
+    const [meetingsSnap, attendanceSnap, suspSnap] = results;
+    const usersSnap = skipRoster ? null : results[3];
     
     const meetings = meetingsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
     const attendance = attendanceSnap.docs.map(doc => doc.data());
@@ -230,7 +238,7 @@ exports.getAllReports = async (req, res) => {
     res.json({ 
       meetings, 
       attendance, 
-      users: usersSnap.docs.map(doc => doc.data()), 
+      users: usersSnap ? usersSnap.docs.map(doc => doc.data()) : [], 
       suspiciousLogs,
       stats: { 
         totalMeetings: meetings.length, 
@@ -240,6 +248,25 @@ exports.getAllReports = async (req, res) => {
       }
     });
   } catch (error) { res.status(500).send(); }
+};
+
+/**
+ * EMERGENCY REPORTS — Fetch from emergency_meetings & emergency_attendance
+ */
+exports.getEmergencyReports = async (req, res) => {
+  try {
+    const [meetingsSnap, attendanceSnap] = await Promise.all([
+      db.collection('emergency_meetings').get(),
+      db.collection('emergency_attendance').get()
+    ]);
+    res.json({
+      meetings: meetingsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })),
+      attendance: attendanceSnap.docs.map(doc => doc.data())
+    });
+  } catch (error) {
+    console.error('Emergency Reports Error:', error);
+    res.status(500).json({ error: 'Failed to fetch emergency reports' });
+  }
 };
 
 /**

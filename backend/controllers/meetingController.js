@@ -130,46 +130,60 @@ exports.getMeetings = async (req, res) => {
       .get();
       
     const meetings = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-    
-    const [attSnap, suspSnap, usersSnap, masterSnap, tempSnap] = await Promise.all([
-      db.collection("attendance").get(),
-      db.collection("suspiciousLogs").get(),
-      db.collection("users").get(),
-      db.collection("master_roster").get(),
-      db.collection("temporary_roster").get()
-    ]);
 
-    // Merge all known identities: master roster, temporary roster, and users collection
-    const mergedIdentitiesMap = new Map();
+    // QUOTA-FRIENDLY: Only fetch attendance for active meetings
+    const activeMeetings = meetings.filter(m => m.status === 'active').map(m => m.id);
+    let attendanceDocs = [];
+    if (activeMeetings.length > 0) {
+      const safeActive = activeMeetings.slice(0, 10);
+      const attSnap = await db.collection("attendance").where("meetingId", "in", safeActive).get();
+      attendanceDocs = attSnap.docs.map(doc => doc.data());
+    }
 
-    masterSnap.docs.forEach(doc => {
-      const data = doc.data();
-      const vtuNumber = data.vtuNumber || doc.id;
-      mergedIdentitiesMap.set(vtuNumber, { ...data, vtuNumber });
-    });
+    const suspSnap = await db.collection("suspiciousLogs").get();
 
-    tempSnap.docs.forEach(doc => {
-      const data = doc.data();
-      const vtuNumber = data.vtuNumber || doc.id;
-      if (!mergedIdentitiesMap.has(vtuNumber)) {
+    // ROSTER SKIP LOGIC: Skip heavy identity fetches if client doesn't need them
+    const skipRoster = req.query.skipRoster === 'true';
+    let mergedUsers = [];
+
+    if (!skipRoster) {
+      const [usersSnap, masterSnap, tempSnap] = await Promise.all([
+        db.collection("users").get(),
+        db.collection("master_roster").get(),
+        db.collection("temporary_roster").get()
+      ]);
+
+      const mergedIdentitiesMap = new Map();
+
+      masterSnap.docs.forEach(doc => {
+        const data = doc.data();
+        const vtuNumber = data.vtuNumber || doc.id;
         mergedIdentitiesMap.set(vtuNumber, { ...data, vtuNumber });
-      }
-    });
+      });
 
-    usersSnap.docs.forEach(doc => {
-      const data = doc.data();
-      const vtuNumber = data.vtuNumber || (data.email ? data.email.split('@')[0].replace(/\D/g, '') : undefined);
-      if (vtuNumber && !mergedIdentitiesMap.has(vtuNumber)) {
-        mergedIdentitiesMap.set(vtuNumber, { ...data, vtuNumber });
-      }
-    });
+      tempSnap.docs.forEach(doc => {
+        const data = doc.data();
+        const vtuNumber = data.vtuNumber || doc.id;
+        if (!mergedIdentitiesMap.has(vtuNumber)) {
+          mergedIdentitiesMap.set(vtuNumber, { ...data, vtuNumber });
+        }
+      });
 
-    const mergedUsers = Array.from(mergedIdentitiesMap.values());
+      usersSnap.docs.forEach(doc => {
+        const data = doc.data();
+        const vtuNumber = data.vtuNumber || (data.email ? data.email.split('@')[0].replace(/\D/g, '') : undefined);
+        if (vtuNumber && !mergedIdentitiesMap.has(vtuNumber)) {
+          mergedIdentitiesMap.set(vtuNumber, { ...data, vtuNumber });
+        }
+      });
+
+      mergedUsers = Array.from(mergedIdentitiesMap.values());
+    }
 
     return res.json({ 
       success: true, 
       meetings, 
-      attendance: attSnap.docs.map(doc => doc.data()), 
+      attendance: attendanceDocs, 
       suspiciousLogs: suspSnap.docs.map(doc => doc.data()), 
       users: mergedUsers
     });
@@ -270,6 +284,44 @@ exports.closeAttendance = async (req, res) => {
     return res.json({ success: true });
   } catch (error) {
     return res.status(500).json({ success: false });
+  }
+};
+
+// --- EMERGENCY DATA DUMP (Batch Sync from Emergency Portal) ---
+exports.syncEmergencyData = async (req, res) => {
+  const { scans, sessions } = req.body;
+  const batch = db.batch();
+
+  try {
+    // 1. Route Sessions to 'emergency_meetings'
+    if (sessions && sessions.length > 0) {
+      sessions.forEach(session => {
+        const sessionRef = db.collection('emergency_meetings').doc(session.meetingId);
+        batch.set(sessionRef, {
+          ...session,
+          syncedAt: admin.firestore.FieldValue.serverTimestamp(),
+          syncedBy: req.user.email
+        });
+      });
+    }
+
+    // 2. Route Scans to 'emergency_attendance'
+    if (scans && scans.length > 0) {
+      scans.forEach(scan => {
+        const scanId = `${scan.meetingId}_${scan.vtu}`;
+        const scanRef = db.collection('emergency_attendance').doc(scanId);
+        batch.set(scanRef, {
+          ...scan,
+          syncedAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+      });
+    }
+
+    await batch.commit();
+    res.status(200).json({ message: "Emergency data dumped successfully" });
+  } catch (error) {
+    console.error("Emergency Sync Error:", error);
+    res.status(500).json({ error: "Failed to sync emergency data" });
   }
 };
 
