@@ -291,10 +291,11 @@ export default function HomePage() {
   const handleSubmitExcuse = async (sessionId: string) => {
     setIsSubmittingExcuse(true);
     try {
-      const token = localStorage.getItem('uba_token');
-      if (!token) throw new Error('Not authenticated');
+      // FIX: Get the fresh Firebase token instead of reading from localStorage
+      const user = auth.currentUser;
+      if (!user) throw new Error('Session expired. Please login again.');
+      const token = await user.getIdToken();
 
-      // Get user's GPS coordinates
       const position: GeolocationPosition = await new Promise((resolve, reject) => 
         navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 10000 })
       );
@@ -302,23 +303,25 @@ export default function HomePage() {
 
       const res = await fetch(`${API_URL}/meeting/excuse/submit`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ sessionId, reason: excuseReason, lat: latitude, lng: longitude })
+        headers: { 
+          'Content-Type': 'application/json', 
+          Authorization: `Bearer ${token}` 
+        },
+        body: JSON.stringify({ 
+          meetingId: sessionId, // Match the backend field name
+          vtu: userData?.vtuNumber, // Pass student VTU
+          reason: excuseReason, 
+          lat: latitude, 
+          lng: longitude 
+        })
       });
 
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to submit excuse');
+      if (!res.ok) throw new Error('Failed to submit excuse');
 
       alert('Excuse submitted! Awaiting coordinator review.');
       setShowExcuseModal(null);
       setExcuseReason('');
-      // Refresh excuses
-      const excuseRes = await fetch(`${API_URL}/meeting/excuse/list`, { headers: { Authorization: `Bearer ${token}` } });
-      if (excuseRes.ok) {
-        const d = await excuseRes.json();
-        const myExcuses = (d.excuses || []).filter((e: any) => e.vtu === userData?.vtuNumber && e.status === 'pending');
-        setPendingExcuses(myExcuses);
-      }
+      fetchUserStatus(user, false); // Refresh to update banners
     } catch (err: any) {
       alert(err.message || 'Could not submit excuse');
     } finally {
