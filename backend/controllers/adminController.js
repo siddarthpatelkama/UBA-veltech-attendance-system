@@ -215,21 +215,27 @@ exports.listCoordinators = async (req, res) => {
  */
 exports.getAllReports = async (req, res) => {
   if (req.user.role !== "head") return res.status(403).send();
+  
   try {
     const skipRoster = req.query.skipRoster === 'true';
 
+    // BASE FETCHES: These run every time.
+    // Notice we added the count() aggregation here. It costs 1 read per 1000 users.
     const baseFetches = [
       db.collection("meetings").get(),
       db.collection("attendance").get(),
-      db.collection("suspiciousLogs").get()
+      db.collection("suspiciousLogs").get(),
+      db.collection("users").count().get() 
     ];
 
-    // Only fetch users collection if roster is needed
+    // HEAVY FETCH: Only fetch the full users collection if the frontend actually needs it
     if (!skipRoster) baseFetches.push(db.collection("users").get());
 
     const results = await Promise.all(baseFetches);
-    const [meetingsSnap, attendanceSnap, suspSnap] = results;
-    const usersSnap = skipRoster ? null : results[3];
+    
+    // Unpack the results based on our array order
+    const [meetingsSnap, attendanceSnap, suspSnap, usersCountSnap] = results;
+    const usersSnap = skipRoster ? null : results[4];
     
     const meetings = meetingsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
     const attendance = attendanceSnap.docs.map(doc => doc.data());
@@ -240,6 +246,7 @@ exports.getAllReports = async (req, res) => {
       attendance, 
       users: usersSnap ? usersSnap.docs.map(doc => doc.data()) : [], 
       suspiciousLogs,
+      totalUsersCount: usersCountSnap.data().count, // Pass the cheap count to the frontend
       stats: { 
         totalMeetings: meetings.length, 
         totalAttendance: attendance.length, 
@@ -247,7 +254,10 @@ exports.getAllReports = async (req, res) => {
         uniqueStudents: new Set(attendance.map(a => a.vtuNumber)).size 
       }
     });
-  } catch (error) { res.status(500).send(); }
+  } catch (error) { 
+    console.error("Get All Reports Error:", error);
+    res.status(500).send(); 
+  }
 };
 
 /**
@@ -269,25 +279,123 @@ exports.getEmergencyReports = async (req, res) => {
   }
 };
 
-/**
- * HARD PURGE MEETING
- */
-exports.deleteMeeting = async (req, res) => {
+// --- TOMBSTONING & GARBAGE COLLECTION (FEATURE 6) ---
+
+// 1. Soft Delete (Hides data from users, tells caches to erase it)
+exports.softDeleteMeeting = async (req, res) => {
   if (req.user.role !== "head") return res.status(403).json({ message: "Forbidden" });
   try {
-    const { meetingId } = req.body;
+    const { meetingId, isEmergency } = req.body;
     if (!meetingId) return res.status(400).json({ message: "Meeting ID required" });
 
-    await db.collection("meetings").doc(meetingId).delete();
+    const collectionName = isEmergency ? "emergency_meetings" : "meetings";
+    const attCollection = isEmergency ? "emergency_attendance" : "attendance";
 
-    const attQuery = await db.collection("attendance").where("meetingId", "==", meetingId).get();
     const batch = db.batch();
-    attQuery.docs.forEach(doc => batch.delete(doc.ref));
-    await batch.commit();
+    const now = Date.now();
 
-    res.json({ success: true, message: "Purged successfully" });
+    // Tombstone the meeting
+    const meetingRef = db.collection(collectionName).doc(meetingId);
+    batch.update(meetingRef, { isDeleted: true, updatedAt: now });
+
+    // Tombstone the attendance records
+    const attQuery = await db.collection(attCollection).where("meetingId", "==", meetingId).get();
+    attQuery.docs.forEach(doc => {
+      batch.update(doc.ref, { isDeleted: true, updatedAt: now });
+    });
+
+    // Also tombstone pending excuses to clear the inbox
+    const excuseQuery = await db.collection("pending_excuses").where("meetingId", "==", meetingId).get();
+    excuseQuery.docs.forEach(doc => {
+       batch.update(doc.ref, { isDeleted: true, updatedAt: now });
+    });
+
+    await batch.commit();
+    res.json({ success: true, message: "Meeting archived successfully." });
   } catch (error) {
-    console.error("Delete Error:", error);
-    res.status(500).send();
+    console.error("Soft Delete Error:", error);
+    res.status(500).json({ error: "Failed to archive session" });
   }
+};
+
+// 2. The Garbage Collector (Permanently destroys tombstoned data)
+exports.emptyTrash = async (req, res) => {
+  if (req.user.role !== "head") return res.status(403).json({ message: "Forbidden" });
+  try {
+    const collections = ["meetings", "emergency_meetings", "attendance", "emergency_attendance", "pending_excuses"];
+    const batch = db.batch();
+    let deleteCount = 0;
+
+    for (const col of collections) {
+      const deadDocs = await db.collection(col).where("isDeleted", "==", true).get();
+      deadDocs.docs.forEach(doc => {
+        batch.delete(doc.ref);
+        deleteCount++;
+      });
+    }
+
+    if (deleteCount === 0) return res.json({ success: true, message: "Trash is already empty." });
+
+    await batch.commit();
+    res.json({ success: true, message: `Permanently destroyed ${deleteCount} records.` });
+  } catch (error) {
+    console.error("Garbage Collection Error:", error);
+    res.status(500).json({ error: "Failed to empty trash" });
+  }
+};
+
+// --- CRM: CLUB MANAGEMENT ---
+exports.promoteGuest = async (req, res) => {
+  if (req.user.role !== "head") return res.status(403).json({ message: "Forbidden" });
+  try {
+    const { vtu } = req.body;
+    const tempRef = db.collection("temporary_roster").doc(vtu);
+    const masterRef = db.collection("master_roster").doc(vtu);
+    
+    const doc = await tempRef.get();
+    if (!doc.exists) return res.status(404).json({ message: "Guest not found" });
+    
+    const userData = doc.data();
+    delete userData.isGuest; // Strip the guest tag
+    
+    const batch = db.batch();
+    batch.set(masterRef, { ...userData, updatedAt: Date.now() }, { merge: true });
+    batch.delete(tempRef);
+    await batch.commit();
+    
+    res.json({ success: true, message: "Promoted to Master Roster" });
+  } catch (error) { res.status(500).json({ error: "Failed to promote" }); }
+};
+
+exports.demoteMember = async (req, res) => {
+  if (req.user.role !== "head") return res.status(403).json({ message: "Forbidden" });
+  try {
+    const { vtu } = req.body;
+    const tempRef = db.collection("temporary_roster").doc(vtu);
+    const masterRef = db.collection("master_roster").doc(vtu);
+    
+    const doc = await masterRef.get();
+    if (!doc.exists) return res.status(404).json({ message: "Member not found" });
+    
+    const userData = doc.data();
+    
+    const batch = db.batch();
+    batch.set(tempRef, { ...userData, isGuest: true, updatedAt: Date.now() }, { merge: true });
+    batch.delete(masterRef);
+    await batch.commit();
+    
+    res.json({ success: true, message: "Demoted to Temporary Roster" });
+  } catch (error) { res.status(500).json({ error: "Failed to demote" }); }
+};
+
+exports.addManualMember = async (req, res) => {
+  if (req.user.role !== "head") return res.status(403).json({ message: "Forbidden" });
+  try {
+    const { vtu, name, dept, year, gender, phone } = req.body;
+    const cleanVtu = vtu.toUpperCase().replace(/\D/g, '');
+    await db.collection("master_roster").doc(cleanVtu).set({
+      vtuNumber: cleanVtu, name, dept, year, gender, phone: phone || 'N/A', updatedAt: Date.now()
+    }, { merge: true });
+    res.json({ success: true, message: "Member Added" });
+  } catch (error) { res.status(500).json({ error: "Failed to add member" }); }
 };

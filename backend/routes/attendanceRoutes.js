@@ -28,6 +28,7 @@ router.get("/history", verifyToken, attendanceController.getStudentHistory);
 // --- MEETING MANAGEMENT ---
 router.get("/meetings", verifyToken, meetingController.getMeetings);
 router.post("/meeting/create", verifyToken, meetingController.createMeeting);
+router.post("/meeting/schedule", verifyToken, meetingController.scheduleMeeting);
 router.post("/meeting/close", verifyToken, meetingController.closeAttendance);
 router.get("/meeting/stats/:id", verifyToken, meetingController.getLiveStats);
 
@@ -35,6 +36,11 @@ router.get("/meeting/stats/:id", verifyToken, meetingController.getLiveStats);
 router.post("/meeting/update-manifest", verifyToken, meetingController.updateManifest);
 router.post("/meeting/create-phase", verifyToken, meetingController.createPhase);
 router.post("/meeting/close-phase", verifyToken, meetingController.closePhase);
+
+// --- EXCUSE ENGINE ---
+router.post("/meeting/excuse/submit", verifyToken, meetingController.submitExcuse);
+router.post("/meeting/excuse/resolve", verifyToken, meetingController.resolveExcuse);
+router.get("/meeting/excuse/list", verifyToken, meetingController.getExcuses);
 
 // Endpoint to receive bulk offline scans when Student Coordinators return to Wi-Fi
 router.post("/meeting/offline-sync", verifyToken, meetingController.syncOfflineAttendance);
@@ -51,7 +57,8 @@ router.post("/admin/add-coordinator", verifyToken, adminController.addCoordinato
 router.post("/admin/remove-coordinator", verifyToken, adminController.removeCoordinator);
 router.get("/admin/all-reports", verifyToken, adminController.getAllReports);
 router.get("/admin/emergency-reports", verifyToken, adminController.getEmergencyReports);
-router.post("/admin/delete-meeting", verifyToken, adminController.deleteMeeting); 
+router.post("/admin/delete-meeting", verifyToken, adminController.softDeleteMeeting); 
+router.post("/admin/empty-trash", verifyToken, adminController.emptyTrash);
 
 // NEW: Endpoint for Resetting Student Device Binding
 router.post("/admin/reset-device", verifyToken, adminController.resetDeviceLock);
@@ -59,5 +66,10 @@ router.post("/admin/reset-device", verifyToken, adminController.resetDeviceLock)
 // --- MASTER ROSTER MANAGEMENT ---
 router.post("/admin/master-roster/upload", verifyToken, adminController.uploadMasterRoster);
 router.post("/admin/master-roster/purge", verifyToken, adminController.purgeMasterRoster);
+
+// --- CRM: CLUB MEMBER MANAGEMENT ---
+router.post("/admin/crm/promote", verifyToken, adminController.promoteGuest);
+router.post("/admin/crm/demote", verifyToken, adminController.demoteMember);
+router.post("/admin/crm/add-member", verifyToken, adminController.addManualMember);
 
 module.exports = router;

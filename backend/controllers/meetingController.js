@@ -1,5 +1,6 @@
 const admin = require("../firebaseAdmin");
 const db = require("../config/firebase");
+const fcm = require('../utils/fcm'); // FCM Notification Engine
 
 // --- SESSION CREATION ---
 exports.createMeeting = async (req, res) => {
@@ -58,20 +59,42 @@ exports.updateManifest = async (req, res) => {
       await meetingRef.update({ manifest: admin.firestore.FieldValue.arrayUnion(...students) });
     } else if (action === 'add') {
       const cleanedVtu = vtu.toUpperCase().replace(/\D/g, '');
-      await meetingRef.update({ manifest: admin.firestore.FieldValue.arrayUnion({ vtu: cleanedVtu, name: 'Manually Added', phone: '' }) });
+      
+      // 1. Check if they were in the expected CSV Manifest
+      const doc = await meetingRef.get();
+      const meetingData = doc.data();
+      const inManifest = meetingData.manifest && meetingData.manifest.some(m => m.vtu === cleanedVtu);
+      const isWalkIn = !inManifest; // If not in CSV, they are a walk-in
 
-      // Also write to attendance collection so live dashboard count increases
+      const studentName = req.body.studentName || `Guest ${cleanedVtu}`;
+
+      // 2. Write to Attendance
       const attendanceDocId = `${meetingId}_${cleanedVtu}`;
       await db.collection("attendance").doc(attendanceDocId).set({
         meetingId,
         vtuNumber: cleanedVtu,
-        studentName: 'Manually Added',
-        isOverride: true,
+        studentName: studentName,
+        isOverride: req.body.isOverride || false,
+        overrideCategory: req.body.category || 'UBA Member', // FEATURE 9: Taxonomy
+        isWalkIn: isWalkIn, // Tagged for admin analytics
         enteredBy: req.user ? req.user.email : 'unknown',
-        timestamp: admin.firestore.FieldValue.serverTimestamp(),
-        dateString: new Date().toLocaleString(),
+        timestamp: Date.now(),
+        dateString: new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }),
         phaseId: req.body.phaseId || 'none'
       }, { merge: true });
+
+      // 3. The Temp Roster Fallback
+      if (isWalkIn) {
+        const masterCheck = await db.collection("master_roster").doc(cleanedVtu).get();
+        if (!masterCheck.exists) {
+           await db.collection("temporary_roster").doc(cleanedVtu).set({
+               vtuNumber: cleanedVtu,
+               name: studentName,
+               isGuest: true,
+               addedAt: Date.now()
+           }, { merge: true });
+        }
+      }
     } else if (action === 'remove') {
       const doc = await meetingRef.get();
       const newManifest = doc.data().manifest.filter(m => m.vtu !== vtu.toUpperCase());
@@ -105,6 +128,15 @@ exports.createPhase = async (req, res) => {
       attendanceActive: true
     });
     
+    // --- FCM Trigger 2: Phase Live Broadcast ---
+    await fcm.sendNotification(
+      `meeting_${meetingId}`, // Subscribers to this specific event
+      `🔴 SESSION LIVE`,
+      `${phaseTitle} has started! Open your app to scan the QR code.`,
+      { type: 'live', meetingId: meetingId, phaseId: newPhase.id }
+    );
+    // ---------------------------------------------
+
     return res.json({ success: true });
   } catch (error) { return res.status(500).json({ success: false }); }
 };
@@ -265,15 +297,24 @@ exports.syncOfflineAttendance = async (req, res) => {
   }
 };
 
-// --- SESSION CLOSING ---
+// --- SESSION CLOSING & STRIKE ENGINE (FEATURE 3) ---
 exports.closeAttendance = async (req, res) => {
   try {
     const { meetingId } = req.body;
     const meetingRef = db.collection("meetings").doc(meetingId);
-    const doc = await meetingRef.get();
-    const updatedPhases = (doc.data().phases || []).map(p => ({ ...p, status: 'closed' }));
+    const meetingDoc = await meetingRef.get();
 
-    await meetingRef.update({
+    if (!meetingDoc.exists) {
+      return res.status(404).json({ success: false, message: "Meeting not found" });
+    }
+
+    const meetingData = meetingDoc.data();
+    const updatedPhases = (meetingData.phases || []).map(p => ({ ...p, status: 'closed' }));
+
+    const batch = db.batch();
+
+    // 1. Close the Meeting
+    batch.update(meetingRef, {
       status: "closed",
       attendanceActive: false,
       phases: updatedPhases,
@@ -281,9 +322,93 @@ exports.closeAttendance = async (req, res) => {
       closedByName: req.user.name || req.user.email.split('@')[0],
       closedAt: Date.now()
     });
-    return res.json({ success: true });
+
+    // 2. STRIKE & DEMOTION PIPELINE (Verifiable Trips Only)
+    if (meetingData.type === "verifiable" && meetingData.manifest && meetingData.manifest.length > 0) {
+      
+      // Fetch all successful scans for this meeting
+      const attendanceSnap = await db.collection("attendance").where("meetingId", "==", meetingId).get();
+      const attendedVtus = new Set(attendanceSnap.docs.map(doc => doc.data().vtuNumber));
+
+      // Find who missed the event
+      const missingStudents = meetingData.manifest.filter(m => !attendedVtus.has(m.vtu));
+
+      for (const student of missingStudents) {
+        const masterRef = db.collection("master_roster").doc(student.vtu);
+        const masterDoc = await masterRef.get();
+
+        if (masterDoc.exists) {
+          const userData = masterDoc.data();
+          const currentStrikes = (userData.strikes || 0) + 1; // Apply +1 Strike immediately
+
+          // Create the Pending Excuse Document
+          const excuseRef = db.collection("pending_excuses").doc(`${meetingId}_${student.vtu}`);
+          batch.set(excuseRef, {
+            vtu: student.vtu,
+            meetingId: meetingId,
+            eventTitle: meetingData.title,
+            status: 'pending',
+            createdAt: Date.now(),
+            strikesAdded: 1
+          });
+
+          // Execute 3-Strike Rule (Demotion)
+          if (currentStrikes >= 3) {
+            const tempRef = db.collection("temporary_roster").doc(student.vtu);
+            batch.set(tempRef, {
+              ...userData,
+              strikes: currentStrikes,
+              isGuest: true,
+              demotedAt: Date.now()
+            }, { merge: true });
+            
+            batch.delete(masterRef); // Remove from Club
+
+            // --- FCM Trigger 3A: Account Demotion Alert ---
+            await fcm.sendNotification(
+              `student_${student.vtu}`, // Targeted specifically to this student
+              `🚨 UBA Account Demoted`,
+              `You have missed 3 events. You have been removed from the Master Roster.`,
+              { type: 'demotion', vtu: student.vtu }
+            );
+            // ----------------------------------------------
+          } else {
+            // Otherwise, just update the strike count in the master roster
+            batch.update(masterRef, { strikes: currentStrikes });
+
+            // --- FCM Trigger 3B: Strike Warning Alert ---
+            await fcm.sendNotification(
+              `student_${student.vtu}`,
+              `⚠️ Strike Added (${currentStrikes}/3)`,
+              `You missed ${meetingData.title}. Submit an excuse with GPS immediately to avoid demotion.`,
+              { type: 'strike_warning', meetingId: meetingId }
+            );
+            // ----------------------------------------------
+          }
+        }
+      }
+    }
+
+    await batch.commit();
+
+    // --- FCM Trigger 4: Admin Analytics Summary ---
+    if (meetingData.type === "verifiable" && meetingData.manifest) {
+        const attendanceSnap2 = await db.collection("attendance").where("meetingId", "==", meetingId).get();
+        const attendedCount = attendanceSnap2.size;
+        const missingCount = (meetingData.manifest || []).length - attendedCount;
+        await fcm.sendNotification(
+          'admin',
+          `📊 Trip Closed: ${meetingData.title}`,
+          `${attendedCount} Verified. ${missingCount} Missing. Strikes applied.`,
+          { type: 'analytics', meetingId: meetingId }
+        );
+    }
+    // ----------------------------------------------
+
+    return res.json({ success: true, message: "Meeting closed and strike pipeline executed." });
   } catch (error) {
-    return res.status(500).json({ success: false });
+    console.error("Close Meeting Error:", error);
+    return res.status(500).json({ success: false, message: "Failed to close session." });
   }
 };
 
@@ -332,4 +457,108 @@ exports.getLiveStats = async (req, res) => {
     const snap = await db.collection("attendance").where("meetingId", "==", id).get();
     res.json({ total: snap.size });
   } catch (e) { res.status(500).send(); }
+};
+
+// --- EVENT SCHEDULING ---
+exports.scheduleMeeting = async (req, res) => {
+  try {
+    if (req.user.role !== "head" && req.user.role !== "coordinator" && req.user.role !== "student_coordinator") {
+      return res.status(403).json({ success: false, message: "Access denied." });
+    }
+
+    const { title, date, time, venue, targetAudience, manifest } = req.body;
+    if (!title || !date) return res.status(400).json({ success: false, message: "Title and Date required" });
+
+    const meetingData = {
+      title: title,
+      date: date,
+      time: time || "TBA",
+      venue: venue || "TBA",
+      targetAudience: targetAudience || [], // Array like ["2", "3"]
+      manifest: manifest || [], // Expected CSV roster
+      status: "scheduled",
+      type: "verifiable",
+      attendanceActive: false,
+      coordinatorId: req.user.email,
+      createdByName: req.user.name || req.user.email.split('@')[0],
+      createdAt: Date.now()
+    };
+
+    const docRef = await db.collection("meetings").add(meetingData);
+    
+    // --- FCM Trigger 1: Scheduled Event Broadcast ---
+    // If targetAudience is specified, alert those years. Otherwise, alert everyone.
+    const targetTopics = (targetAudience && targetAudience.length > 0) ? targetAudience.map(y => `year_${y}`) : ['all_students'];
+    
+    for (const topic of targetTopics) {
+      await fcm.sendNotification(
+        topic,
+        `🗓️ New Event: ${title}`,
+        `Scheduled for ${date} at ${venue || 'TBA'}. Check your app for details.`,
+        { type: 'scheduled', meetingId: docRef.id }
+      );
+    }
+    // ------------------------------------------------
+
+    return res.status(201).json({ success: true, meetingId: docRef.id });
+  } catch (error) {
+    console.error("Schedule Error:", error);
+    return res.status(500).json({ success: false, message: "Failed to schedule event" });
+  }
+};
+
+// --- EXCUSE ENGINE (FEATURE 4) ---
+exports.submitExcuse = async (req, res) => {
+  try {
+    const { meetingId, vtu, reason, lat, lng } = req.body;
+    if (!meetingId || !vtu || !reason) return res.status(400).json({ error: "Missing fields" });
+
+    const excuseId = `${meetingId}_${vtu}`;
+    await db.collection("pending_excuses").doc(excuseId).set({
+      reason, lat, lng,
+      status: 'submitted', // Changes from 'pending' (auto-created) to 'submitted'
+      submittedAt: Date.now()
+    }, { merge: true });
+
+    res.json({ success: true, message: "Excuse submitted" });
+  } catch (error) { res.status(500).json({ error: "Failed to submit excuse" }); }
+};
+
+exports.resolveExcuse = async (req, res) => {
+  if (req.user.role !== "head" && req.user.role !== "coordinator" && req.user.role !== "student_coordinator") {
+    return res.status(403).json({ error: "Forbidden" });
+  }
+  try {
+    const { excuseId, vtu, action } = req.body; // action: 'accept' or 'reject'
+    const excuseRef = db.collection("pending_excuses").doc(excuseId);
+    
+    const batch = db.batch();
+    batch.update(excuseRef, { status: action === 'accept' ? 'accepted' : 'rejected', resolvedAt: Date.now(), resolvedBy: req.user.email });
+
+    if (action === 'accept') {
+      const masterRef = db.collection("master_roster").doc(vtu);
+      batch.update(masterRef, { strikes: admin.firestore.FieldValue.increment(-1) }); // Wipe the strike
+    }
+
+    await batch.commit();
+    res.json({ success: true });
+  } catch (error) { res.status(500).json({ error: "Failed to resolve" }); }
+};
+
+// --- SECURITY PATCH: ISOLATED EXCUSE FETCHING ---
+exports.getExcuses = async (req, res) => {
+  try {
+    let query = db.collection("pending_excuses").where("status", "in", ["pending", "submitted"]);
+    
+    // LOOPHOLE CLOSED: If user is a student, STRICTLY limit the query to their own VTU.
+    if (req.user.role === "student") {
+      const vtu = req.user.email.split('@')[0].toUpperCase().replace(/\D/g, '');
+      query = query.where("vtu", "==", vtu);
+    }
+    
+    const snap = await query.get();
+    res.json({ success: true, excuses: snap.docs.map(d => ({ id: d.id, ...d.data() })) });
+  } catch (error) { 
+    res.status(500).json({ error: "Failed to fetch excuses" }); 
+  }
 };
