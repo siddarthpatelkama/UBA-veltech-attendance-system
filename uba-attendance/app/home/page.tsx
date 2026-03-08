@@ -291,39 +291,55 @@ export default function HomePage() {
   const handleSubmitExcuse = async (sessionId: string) => {
     setIsSubmittingExcuse(true);
     try {
-      // FIX: Get the fresh Firebase token instead of reading from localStorage
       const user = auth.currentUser;
-      if (!user) throw new Error('Session expired. Please login again.');
+      if (!user) throw new Error('Not authenticated');
       const token = await user.getIdToken();
 
+      // Ensure we have a valid VTU before sending
+      const vtuToSubmit = userData?.vtuNumber || user.email?.split('@')[0].toUpperCase().replace(/\D/g, '');
+      if (!vtuToSubmit) throw new Error('VTU ID not found');
+
       const position: GeolocationPosition = await new Promise((resolve, reject) => 
-        navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 10000 })
+        navigator.geolocation.getCurrentPosition(resolve, reject, { 
+          enableHighAccuracy: true, 
+          timeout: 10000 
+        })
       );
       const { latitude, longitude } = position.coords;
+
+      // Log for debugging
+      console.log("Submitting excuse for:", sessionId, "VTU:", vtuToSubmit);
 
       const res = await fetch(`${API_URL}/meeting/excuse/submit`, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json', 
-          Authorization: `Bearer ${token}` 
+          'Authorization': `Bearer ${token}` 
         },
         body: JSON.stringify({ 
-          meetingId: sessionId, // Match the backend field name
-          vtu: userData?.vtuNumber, // Pass student VTU
+          meetingId: sessionId, // Ensure this is the actual Meeting ID
+          vtu: vtuToSubmit, 
           reason: excuseReason, 
           lat: latitude, 
           lng: longitude 
         })
       });
 
-      if (!res.ok) throw new Error('Failed to submit excuse');
+      const result = await res.json();
 
-      alert('Excuse submitted! Awaiting coordinator review.');
+      if (!res.ok) {
+        throw new Error(result.error || result.message || 'Failed to submit excuse');
+      }
+
+      alert('Excuse submitted successfully! ✅');
       setShowExcuseModal(null);
       setExcuseReason('');
-      fetchUserStatus(user, false); // Refresh to update banners
+      
+      // Force refresh data to clear the pending flag
+      fetchUserStatus(user, false);
     } catch (err: any) {
-      alert(err.message || 'Could not submit excuse');
+      console.error("Submission Error:", err);
+      alert(err.message || 'Could not submit excuse. Please try again.');
     } finally {
       setIsSubmittingExcuse(false);
     }
