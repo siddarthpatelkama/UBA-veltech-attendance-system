@@ -63,20 +63,37 @@ exports.updateManifest = async (req, res) => {
       // 1. Check if they were in the expected CSV Manifest
       const doc = await meetingRef.get();
       const meetingData = doc.data();
-      const inManifest = meetingData.manifest && meetingData.manifest.some(m => m.vtu === cleanedVtu);
-      const isWalkIn = !inManifest; // If not in CSV, they are a walk-in
+      const manifestUser = meetingData.manifest && meetingData.manifest.find(m => String(m.vtu) === cleanedVtu);
+      const isWalkIn = !manifestUser;
 
-      const studentName = req.body.studentName || `Guest ${cleanedVtu}`;
+      // 1.5 Smart Name & Category Resolution
+      const masterCheck = await db.collection("master_roster").doc(cleanedVtu).get();
+      let autoCategory = req.body.category || 'Guest';
+      let autoName = req.body.studentName;
+
+      if (masterCheck.exists) {
+         const mData = masterCheck.data();
+         autoCategory = mData.isGuest ? 'Guest' : 'UBA Member';
+         if (!autoName || autoName.includes('Guest ') || autoName.includes('Scanned: ') || autoName.includes('Manual: ')) {
+             autoName = mData.name;
+         }
+      } else if (manifestUser && manifestUser.name) {
+         if (!autoName || autoName.includes('Guest ') || autoName.includes('Scanned: ') || autoName.includes('Manual: ')) {
+             autoName = manifestUser.name;
+         }
+      }
+      
+      const finalName = autoName || `Guest ${cleanedVtu}`;
 
       // 2. Write to Attendance
       const attendanceDocId = `${meetingId}_${cleanedVtu}`;
       await db.collection("attendance").doc(attendanceDocId).set({
         meetingId,
         vtuNumber: cleanedVtu,
-        studentName: studentName,
+        studentName: finalName,
         isOverride: req.body.isOverride || false,
-        overrideCategory: req.body.category || 'UBA Member', // FEATURE 9: Taxonomy
-        isWalkIn: isWalkIn, // Tagged for admin analytics
+        overrideCategory: autoCategory,
+        isWalkIn: isWalkIn,
         enteredBy: req.user ? req.user.email : 'unknown',
         timestamp: Date.now(),
         dateString: new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }),
@@ -85,11 +102,10 @@ exports.updateManifest = async (req, res) => {
 
       // 3. The Temp Roster Fallback
       if (isWalkIn) {
-        const masterCheck = await db.collection("master_roster").doc(cleanedVtu).get();
         if (!masterCheck.exists) {
            await db.collection("temporary_roster").doc(cleanedVtu).set({
                vtuNumber: cleanedVtu,
-               name: studentName,
+               name: finalName,
                isGuest: true,
                addedAt: Date.now()
            }, { merge: true });
@@ -560,5 +576,33 @@ exports.getExcuses = async (req, res) => {
     res.json({ success: true, excuses: snap.docs.map(d => ({ id: d.id, ...d.data() })) });
   } catch (error) { 
     res.status(500).json({ error: "Failed to fetch excuses" }); 
+  }
+};
+
+// --- ACTIVATE SCHEDULED MEETING ---
+exports.activateScheduledMeeting = async (req, res) => {
+  try {
+    if (req.user.role !== "head" && req.user.role !== "coordinator" && req.user.role !== "student_coordinator") {
+      return res.status(403).json({ success: false, message: "Access denied." });
+    }
+
+    const { meetingId } = req.body;
+    if (!meetingId) return res.status(400).json({ error: "Missing meeting ID" });
+
+    const meetingRef = db.collection("meetings").doc(meetingId);
+    
+    // We update the status to active, and reset the createdAt timer so they get the full 30 minutes from RIGHT NOW.
+    await meetingRef.update({
+      status: "active",
+      attendanceActive: true,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      startTime: Date.now(),
+      expiresAt: Date.now() + (60 * 60 * 1000)
+    });
+
+    return res.json({ success: true, message: "Scheduled meeting is now live." });
+  } catch (error) {
+    console.error("Activate Error:", error);
+    return res.status(500).json({ success: false, message: "Failed to activate meeting" });
   }
 };

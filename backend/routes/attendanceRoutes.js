@@ -29,6 +29,7 @@ router.get("/history", verifyToken, attendanceController.getStudentHistory);
 router.get("/meetings", verifyToken, meetingController.getMeetings);
 router.post("/meeting/create", verifyToken, meetingController.createMeeting);
 router.post("/meeting/schedule", verifyToken, meetingController.scheduleMeeting);
+router.post("/meeting/activate", verifyToken, meetingController.activateScheduledMeeting);
 router.post("/meeting/close", verifyToken, meetingController.closeAttendance);
 router.get("/meeting/stats/:id", verifyToken, meetingController.getLiveStats);
 
