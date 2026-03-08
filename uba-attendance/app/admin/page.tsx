@@ -46,6 +46,9 @@ export default function AdminPage() {
   const [initialLoad, setInitialLoad] = useState(true); 
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   
+  // --- ENTERPRISE NAVIGATION STATE ---
+  const [adminTab, setAdminTab] = useState<'operations' | 'roster' | 'schedule'>('operations');
+  
   // UI & UX Enhancement States
   const [analyticsViewMap, setAnalyticsViewMap] = useState<{ [key: string]: boolean }>({});
   const [tabMap, setTabMap] = useState<{ [key: string]: string }>({});
@@ -63,6 +66,10 @@ export default function AdminPage() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [isRestoringBackup, setIsRestoringBackup] = useState(false);
 
+  // --- DEAN'S REPORT FILTER MODAL STATE ---
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [exportFilters, setExportFilters] = useState({ year: 'All', status: 'All' });
+
   // Event Scheduling States
   const [scheduleForm, setScheduleForm] = useState({ title: '', date: '', time: '', venue: '', targetAudience: [] as string[] });
   const [scheduleManifest, setScheduleManifest] = useState<any[]>([]);
@@ -70,7 +77,6 @@ export default function AdminPage() {
   // CRM States
   const [crmTab, setCrmTab] = useState<'members' | 'guests'>('members');
   const [crmFilters, setCrmFilters] = useState({ gender: 'All', year: 'All', minEvents: 1 });
-  const [newMemberForm, setNewMemberForm] = useState({ vtu: '', name: '', dept: '', year: '', gender: 'Male', phone: '' });
 
   const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://uba-veltech-attendance-backend-system.onrender.com";
 
@@ -555,20 +561,18 @@ export default function AdminPage() {
     link.click();
   };
 
-  // --- FEATURE 7: GLOBAL SEMESTER EXPORT ---
+  // --- FEATURE 7: GLOBAL SEMESTER EXPORT WITH FILTERS ---
   const handleGlobalExport = () => {
     if (!data.users || data.users.length === 0) return showToast("No users available for export.");
 
     let csv = "S.NO,Student Name,VTU,Department,Year,Club Status,Total Events Attended,Expected Verifiable Trips,Overall %,Strikes\n";
 
-    // 1. Map: How many distinct events did each VTU actually attend?
     const userAttendanceMap: Record<string, Set<string>> = {};
     (data.attendance || []).forEach((a: any) => {
        if (!userAttendanceMap[a.vtuNumber]) userAttendanceMap[a.vtuNumber] = new Set();
        userAttendanceMap[a.vtuNumber].add(a.meetingId);
     });
 
-    // 2. Map: How many verifiable events was each VTU *scheduled* to attend?
     const expectedTripsMap: Record<string, number> = {};
     (data.meetings || []).forEach((m: any) => {
        if (m.type === 'verifiable' && m.manifest) {
@@ -580,50 +584,46 @@ export default function AdminPage() {
        }
     });
 
-    // 3. Combine Data
     const exportData = data.users.map((u: any) => {
       const vtu = String(u.vtuNumber);
       const attended = userAttendanceMap[vtu] ? userAttendanceMap[vtu].size : 0;
       const expected = expectedTripsMap[vtu] || 0;
-      
-      // If they weren't in any verifiable manifests, base percentage solely on attended standard events (if any)
       const percentage = expected === 0 ? (attended > 0 ? 100 : 0) : Math.round((attended / expected) * 100);
-
       return {
-         name: u.name || 'Unknown',
-         vtu: vtu,
-         dept: u.dept || 'N/A',
-         year: u.year || 'N/A',
-         status: u.isGuest ? 'Guest' : 'Member',
-         attended,
-         expected,
-         percentage,
-         strikes: u.strikes || 0
+         name: u.name || 'Unknown', vtu: vtu, dept: u.dept || 'N/A', year: u.year || 'N/A',
+         status: u.isGuest ? 'Guest' : 'Member', attended, expected, percentage, strikes: u.strikes || 0
       };
     });
 
-    // 4. Sort: Members first, then by Year, then by VTU
-    exportData.sort((a: any, b: any) => {
+    // APPLY FILTERS
+    const filteredExport = exportData.filter((row: any) => {
+        if (exportFilters.year !== 'All' && String(row.year) !== exportFilters.year) return false;
+        if (exportFilters.status !== 'All' && row.status !== exportFilters.status) return false;
+        return true;
+    });
+
+    if (filteredExport.length === 0) return showToast("No students match these export filters.");
+
+    filteredExport.sort((a: any, b: any) => {
        if (a.status !== b.status) return a.status === 'Member' ? -1 : 1;
        if (a.year !== b.year) return String(a.year).localeCompare(String(b.year));
        return a.vtu.localeCompare(b.vtu);
     });
 
-    // 5. Generate Rows
-    exportData.forEach((row: any, index: number) => {
+    filteredExport.forEach((row: any, index: number) => {
        csv += `${index + 1},"${row.name}",${row.vtu},${row.dept},${row.year},${row.status},${row.attended},${row.expected},${row.percentage}%,${row.strikes}\n`;
     });
 
-    // 6. Download
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement("a");
     const url = URL.createObjectURL(blob);
     link.setAttribute("href", url);
-    link.setAttribute("download", `UBA_Semester_Report_${new Date().toISOString().split('T')[0]}.csv`);
+    link.setAttribute("download", `UBA_Report_${exportFilters.year}_${exportFilters.status}_${new Date().toISOString().split('T')[0]}.csv`);
     link.style.visibility = 'hidden';
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    setShowExportModal(false);
   };
 
   const getMeetingStats = (attendeesList: any[]) => {
@@ -693,6 +693,35 @@ export default function AdminPage() {
           </div>
         )}
 
+        {/* --- DEAN'S REPORT EXPORT MODAL --- */}
+        {showExportModal && (
+          <div className="fixed inset-0 bg-black/60 z-[200] flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => setShowExportModal(false)}>
+            <div className="bg-white p-8 rounded-3xl w-full max-w-sm shadow-2xl" onClick={e => e.stopPropagation()}>
+              <h2 className="text-xl font-black text-gray-900 mb-2 uppercase">Dean's Report</h2>
+              <p className="text-xs font-bold text-gray-500 mb-6 uppercase tracking-widest">Filter Global Export Data</p>
+              
+              <div className="space-y-4 mb-8">
+                <div>
+                  <label className="block text-[10px] font-black text-[#FF5722] uppercase tracking-widest mb-1">Filter by Year</label>
+                  <select value={exportFilters.year} onChange={e => setExportFilters({...exportFilters, year: e.target.value})} className="w-full p-4 border border-gray-200 rounded-xl font-bold outline-none focus:border-[#FF5722]">
+                    <option value="All">All Years</option><option value="1">Year 1</option><option value="2">Year 2</option><option value="3">Year 3</option><option value="4">Year 4</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-black text-[#FF5722] uppercase tracking-widest mb-1">Filter by Status</label>
+                  <select value={exportFilters.status} onChange={e => setExportFilters({...exportFilters, status: e.target.value})} className="w-full p-4 border border-gray-200 rounded-xl font-bold outline-none focus:border-[#FF5722]">
+                    <option value="All">All Statuses (Members + Guests)</option><option value="Member">Official Members Only</option><option value="Guest">Guests Only</option>
+                  </select>
+                </div>
+              </div>
+              <div className="flex gap-3">
+                <button onClick={() => setShowExportModal(false)} className="flex-1 py-4 bg-gray-100 text-gray-600 rounded-xl font-black uppercase text-xs">Cancel</button>
+                <button onClick={handleGlobalExport} className="flex-1 py-4 bg-green-600 text-white rounded-xl font-black uppercase tracking-widest text-xs shadow-lg hover:bg-green-700">Download</button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* UNIVERSAL STUDENT DOSSIER MODAL */}
         {selectedStudent && (() => {
           const masterRoster = JSON.parse(localStorage.getItem('uba_master_roster') || '[]');
@@ -743,61 +772,74 @@ export default function AdminPage() {
           );
         })()}
 
-        {/* NAVBAR */}
-        <nav className="bg-white border-b-2 border-[#FF5722] p-4 md:p-6 sticky top-0 shadow-sm z-40 relative">
-          <div className="max-w-7xl mx-auto flex justify-between items-center">
+        {/* ENTERPRISE NAVBAR */}
+        <nav className="bg-white border-b-2 border-[#FF5722] sticky top-0 shadow-sm z-40">
+          <div className="max-w-7xl mx-auto px-4 md:px-6 py-4 flex justify-between items-center">
             <div className="flex items-center gap-3">
               <img src="/uba-logo.png" className="h-10 w-10 object-contain rounded-full" alt="UBA" />
-              <h1 className="font-black uppercase tracking-tighter italic text-sm md:text-xl text-gray-900">Admin Console</h1>
+              <h1 className="font-black uppercase tracking-tighter italic text-sm md:text-xl text-gray-900 hidden md:block">HQ Console</h1>
             </div>
             
-            <div className="hidden md:flex items-center gap-4">
-              <button onClick={handleEmptyTrash} disabled={isProcessing} className="text-xs font-black px-4 py-2 rounded-xl border-2 border-red-100 text-red-500 hover:bg-red-50 hover:border-red-200 transition uppercase tracking-widest disabled:opacity-50">Empty Trash</button>
-              <button onClick={() => fetchData(true)} className="text-xs font-black px-4 py-2 rounded-xl border-2 border-gray-100 hover:bg-gray-50 transition uppercase tracking-widest text-gray-600">Refresh Data</button>
-              <button onClick={() => signOut(auth)} className="text-xs font-black px-4 py-2 rounded-xl bg-gray-900 text-white hover:bg-black transition tracking-widest uppercase">Logout</button>
+            {/* DESKTOP TABS */}
+            <div className="hidden md:flex bg-gray-100 p-1 rounded-2xl">
+              <button onClick={() => setAdminTab('operations')} className={`px-6 py-2.5 rounded-xl font-black text-xs uppercase tracking-widest transition-all ${adminTab === 'operations' ? 'bg-white text-[#FF5722] shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}>Operations</button>
+              <button onClick={() => setAdminTab('roster')} className={`px-6 py-2.5 rounded-xl font-black text-xs uppercase tracking-widest transition-all ${adminTab === 'roster' ? 'bg-white text-[#FF5722] shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}>Roster & CRM</button>
+              <button onClick={() => setAdminTab('schedule')} className={`px-6 py-2.5 rounded-xl font-black text-xs uppercase tracking-widest transition-all ${adminTab === 'schedule' ? 'bg-white text-[#FF5722] shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}>Schedule</button>
             </div>
 
+            <div className="hidden md:flex items-center gap-3">
+              <button onClick={handleEmptyTrash} disabled={isProcessing} className="text-[10px] font-black px-4 py-2.5 rounded-xl border-2 border-red-100 text-red-500 hover:bg-red-50 hover:border-red-200 transition uppercase tracking-widest disabled:opacity-50">Empty Trash</button>
+              <button onClick={() => fetchData(true)} className="text-[10px] font-black px-4 py-2.5 rounded-xl border-2 border-gray-100 hover:bg-gray-50 transition uppercase tracking-widest text-gray-600">Refresh</button>
+              <button onClick={() => signOut(auth)} className="text-[10px] font-black px-4 py-2.5 rounded-xl bg-gray-900 text-white hover:bg-black transition tracking-widest uppercase">Logout</button>
+            </div>
+
+            {/* MOBILE MENU TOGGLE */}
             <button onClick={() => setIsMenuOpen(!isMenuOpen)} className="md:hidden p-2 bg-[#FFF9F5] rounded-xl border border-[#FF5722]/20">
                <div className={`w-5 h-0.5 bg-[#FF5722] mb-1.5 transition-all ${isMenuOpen ? 'rotate-45 translate-y-2' : ''}`}></div>
                <div className={`w-5 h-0.5 bg-[#FF5722] transition-all ${isMenuOpen ? '-rotate-45 -translate-y-0.5' : ''}`}></div>
             </button>
           </div>
 
+          {/* MOBILE TABS MENU */}
           {isMenuOpen && (
-            <div className="absolute top-full left-0 w-full bg-white border-b-2 border-[#FF5722] p-6 space-y-4 md:hidden animate-in slide-in-from-top-4 shadow-2xl">
-               <button onClick={() => { fetchData(true); setIsMenuOpen(false); }} className="w-full py-4 bg-gray-50 text-gray-700 font-black rounded-2xl uppercase text-xs tracking-widest border border-gray-200">Force Refresh</button>
-               <button onClick={() => signOut(auth)} className="w-full py-4 bg-red-50 text-red-500 font-black rounded-2xl uppercase text-xs tracking-widest border border-red-100">Safe Logout</button>
+            <div className="w-full bg-white border-b-2 border-[#FF5722] p-4 flex flex-col gap-2 md:hidden shadow-2xl animate-in slide-in-from-top-4">
+               <button onClick={() => { setAdminTab('operations'); setIsMenuOpen(false); }} className={`w-full py-4 font-black rounded-xl uppercase text-xs tracking-widest ${adminTab === 'operations' ? 'bg-[#FFF9F5] text-[#FF5722] border border-[#FF5722]/20' : 'bg-gray-50 text-gray-700'}`}>Operations</button>
+               <button onClick={() => { setAdminTab('roster'); setIsMenuOpen(false); }} className={`w-full py-4 font-black rounded-xl uppercase text-xs tracking-widest ${adminTab === 'roster' ? 'bg-[#FFF9F5] text-[#FF5722] border border-[#FF5722]/20' : 'bg-gray-50 text-gray-700'}`}>Roster & CRM</button>
+               <button onClick={() => { setAdminTab('schedule'); setIsMenuOpen(false); }} className={`w-full py-4 font-black rounded-xl uppercase text-xs tracking-widest ${adminTab === 'schedule' ? 'bg-[#FFF9F5] text-[#FF5722] border border-[#FF5722]/20' : 'bg-gray-50 text-gray-700'}`}>Schedule</button>
+               <div className="h-px w-full bg-gray-100 my-2"></div>
+               <button onClick={() => { fetchData(true); setIsMenuOpen(false); }} className="w-full py-4 bg-white text-gray-700 font-black rounded-xl uppercase text-xs tracking-widest border border-gray-200">Force Refresh</button>
+               <button onClick={() => signOut(auth)} className="w-full py-4 bg-red-50 text-red-500 font-black rounded-xl uppercase text-xs tracking-widest border border-red-100">Logout</button>
             </div>
           )}
         </nav>
 
-        <main className="max-w-7xl mx-auto w-full p-4 md:p-6 flex flex-col lg:grid lg:grid-cols-12 gap-8 mt-4">
-          
-          {/* GREETINGS */}
-          <div className="lg:col-span-12 p-8 rounded-[2.5rem] border border-[#FF5722] bg-[#FFF9F5] mb-2 shadow-sm">
-             <h2 className="text-2xl md:text-3xl font-black text-gray-900 tracking-tight">{greeting}</h2>
-             <p className="text-[10px] md:text-xs font-bold text-[#FF5722] uppercase tracking-widest mt-2">UBA Attendance & Trip Verification Engine v2.0</p>
-          </div>
+        <main className="max-w-7xl mx-auto w-full p-4 md:p-6 mt-2 flex-grow">
 
-          {/* STAT BOXES */}
-          <div className="lg:col-span-12 grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-            <div className="p-6 rounded-3xl shadow-sm text-center border-b-4 border-[#FF5722] bg-white"><p className="text-[10px] font-black uppercase text-gray-400 mb-1 tracking-widest">Total Trips</p><p className="text-4xl font-black text-gray-900">{filteredMeetings.length}</p></div>
-            <div className="p-6 rounded-3xl shadow-sm text-center border-b-4 border-[#FF5722] bg-white"><p className="text-[10px] font-black uppercase text-gray-400 mb-1 tracking-widest">Total Scans</p><p className="text-4xl font-black text-gray-900">{(data.attendance || []).length}</p><p className="text-[8px] font-bold text-red-500 mt-1">{(data.attendance || []).filter((a:any) => a.isEmergency).length > 0 ? `incl. ${(data.attendance || []).filter((a:any) => a.isEmergency).length} SOS` : ''}</p></div>
-            <div className="p-6 rounded-3xl shadow-sm text-center border-b-4 border-gray-900 bg-white"><p className="text-[10px] font-black uppercase text-gray-400 mb-1 tracking-widest">Members</p><p className="text-4xl font-black text-gray-900">{data.totalUsersCount !== undefined ? data.totalUsersCount : (data.users || []).length}</p></div>
-            <div className="p-6 rounded-3xl shadow-sm text-center border-b-4 border-red-500 bg-red-50"><p className="text-[10px] font-black uppercase text-red-400 mb-1 tracking-widest italic">Security Flags</p><p className="text-4xl font-black text-red-600 animate-pulse">{(data.suspiciousLogs || []).length}</p></div>
-          </div>
+          {/* ========================================== */}
+          {/* TAB 1: OPERATIONS (Dashboard & Events) */}
+          {/* ========================================== */}
+          {adminTab === 'operations' && (
+            <div className="space-y-6 animate-in fade-in">
+              {/* STAT BOXES */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="p-6 rounded-3xl shadow-sm text-center border-b-4 border-[#FF5722] bg-white"><p className="text-[10px] font-black uppercase text-gray-400 mb-1 tracking-widest">Total Trips</p><p className="text-4xl font-black text-gray-900">{filteredMeetings.length}</p></div>
+                <div className="p-6 rounded-3xl shadow-sm text-center border-b-4 border-[#FF5722] bg-white"><p className="text-[10px] font-black uppercase text-gray-400 mb-1 tracking-widest">Total Scans</p><p className="text-4xl font-black text-gray-900">{(data.attendance || []).length}</p><p className="text-[8px] font-bold text-red-500 mt-1">{(data.attendance || []).filter((a:any) => a.isEmergency).length > 0 ? `incl. ${(data.attendance || []).filter((a:any) => a.isEmergency).length} SOS` : ''}</p></div>
+                <div className="p-6 rounded-3xl shadow-sm text-center border-b-4 border-gray-900 bg-white"><p className="text-[10px] font-black uppercase text-gray-400 mb-1 tracking-widest">Members</p><p className="text-4xl font-black text-gray-900">{data.totalUsersCount !== undefined ? data.totalUsersCount : (data.users || []).length}</p></div>
+                <div className="p-6 rounded-3xl shadow-sm text-center border-b-4 border-red-500 bg-red-50"><p className="text-[10px] font-black uppercase text-red-400 mb-1 tracking-widest italic">Security Flags</p><p className="text-4xl font-black text-red-600 animate-pulse">{(data.suspiciousLogs || []).length}</p></div>
+              </div>
 
-          {/* EVENTS COLUMN */}
-          <div className="order-1 lg:col-span-8 space-y-6">
-            <div className="p-4 rounded-2xl border border-[#FF5722]/30 flex flex-col md:flex-row gap-4 bg-[#FFF9F5] shadow-sm">
-               <input type="text" placeholder="🔍 Search event or coordinator..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="flex-1 p-4 rounded-xl outline-none font-black text-sm border border-gray-100 bg-white shadow-inner" />
-               <select value={filterMonth} onChange={(e) => setFilterMonth(e.target.value)} className="p-4 text-xs rounded-xl font-black bg-white border border-gray-100 uppercase tracking-widest">{availableMonths.map(month => <option key={month} value={month}>{month}</option>)}</select>
-            </div>
+              <div className="grid lg:grid-cols-12 gap-8">
+                {/* EVENTS COLUMN */}
+                <div className="lg:col-span-8 space-y-6">
+                  <div className="p-4 rounded-2xl border border-[#FF5722]/30 flex flex-col md:flex-row gap-4 bg-[#FFF9F5] shadow-sm">
+                     <input type="text" placeholder="🔍 Search event or coordinator..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="flex-1 p-4 rounded-xl outline-none font-black text-sm border border-gray-100 bg-white shadow-inner" />
+                     <select value={filterMonth} onChange={(e) => setFilterMonth(e.target.value)} className="p-4 text-xs rounded-xl font-black bg-white border border-gray-100 uppercase tracking-widest">{availableMonths.map(month => <option key={month} value={month}>{month}</option>)}</select>
+                  </div>
 
-            <div className="flex items-center gap-2 mb-2 mt-4">
-               <div className="h-2 w-2 rounded-full bg-[#FF5722] animate-pulse"></div>
-               <h3 className="font-black text-xs uppercase tracking-[0.2em] text-gray-400">Live & Recent Deployments</h3>
-            </div>
+                  <div className="flex items-center gap-2 mb-2 mt-4">
+                     <div className="h-2 w-2 rounded-full bg-[#FF5722] animate-pulse"></div>
+                     <h3 className="font-black text-xs uppercase tracking-[0.2em] text-gray-400">Live & Recent Deployments</h3>
+                  </div>
 
             {displayedMeetings.map((m: any) => {
               const attendees = (data.attendance || []).filter((a:any) => a.meetingId === m.id);
@@ -963,168 +1005,180 @@ export default function AdminPage() {
             {!showAllMeetings && filteredMeetings.length > 2 && (
               <button onClick={() => setShowAllMeetings(true)} className="w-full py-5 rounded-3xl border-2 border-dashed border-gray-300 text-gray-500 font-black text-[10px] uppercase tracking-[0.3em] hover:border-[#FF5722] hover:text-[#FF5722] hover:bg-[#FFF9F5] transition-all shadow-sm">Load Older History ({filteredMeetings.length - 2} More)</button>
             )}
-          </div>
+                </div>
 
-          {/* TOOLS COLUMN */}
-          <div className="order-2 lg:col-span-4 space-y-6">
-            
-            {/* ASSIGN COORDINATOR */}
-            <div className="p-6 md:p-8 rounded-[2.5rem] border-2 border-gray-100 bg-white shadow-sm hover:border-gray-200 transition-colors">
-              <h2 className="font-black mb-6 uppercase text-[10px] tracking-[0.2em] text-gray-400 flex items-center gap-2"><span className="text-lg">👑</span> Add Coordinator</h2>
-              <input type="email" value={coordinatorEmail} onChange={(e) => setCoordinatorEmail(e.target.value)} placeholder="Student Email..." className="w-full p-4 border border-gray-100 rounded-2xl mb-4 outline-none font-bold text-sm bg-gray-50 focus:bg-white focus:border-[#FF5722] transition-all" />
-              <button onClick={handleAddCoordinator} disabled={isProcessing} className="w-full bg-[#111827] text-white font-black py-4 rounded-2xl uppercase text-[10px] tracking-widest shadow-lg hover:bg-black transition-colors disabled:opacity-50 disabled:cursor-not-allowed">{isProcessing ? 'Processing...' : 'Approve Access'}</button>
+                {/* COORDINATOR MANAGEMENT SIDEBAR */}
+                <div className="lg:col-span-4 space-y-6">
+                  <div className="p-6 md:p-8 rounded-[2.5rem] border-2 border-gray-100 bg-white shadow-sm hover:border-gray-200 transition-colors">
+                    <h2 className="font-black mb-6 uppercase text-[10px] tracking-[0.2em] text-gray-400 flex items-center gap-2"><span className="text-lg">👑</span> Add Coordinator</h2>
+                    <input type="email" value={coordinatorEmail} onChange={(e) => setCoordinatorEmail(e.target.value)} placeholder="Student Email..." className="w-full p-4 border border-gray-100 rounded-2xl mb-4 outline-none font-bold text-sm bg-gray-50 focus:bg-white focus:border-[#FF5722] transition-all" />
+                    <button onClick={handleAddCoordinator} disabled={isProcessing} className="w-full bg-[#111827] text-white font-black py-4 rounded-2xl uppercase text-[10px] tracking-widest shadow-lg hover:bg-black transition-colors disabled:opacity-50 disabled:cursor-not-allowed">{isProcessing ? 'Processing...' : 'Approve Access'}</button>
 
-              {coordinators.length > 0 && (
-                <div className="mt-8 pt-6 border-t-2 border-dashed border-gray-100">
-                  <h3 className="font-black text-[9px] uppercase text-gray-400 mb-4 tracking-[0.2em]">Active Field Leaders ({coordinators.length})</h3>
-                  <div className="space-y-3 max-h-48 overflow-y-auto custom-scrollbar pr-2">
-                    {coordinators.map((email: string) => (
-                      <div key={email} className="flex justify-between items-center p-4 bg-gray-50 rounded-2xl border border-gray-100 hover:border-gray-200 transition-colors">
-                        <p className="text-xs font-bold text-gray-800 truncate w-[60%]">{email}</p>
-                        <button onClick={() => handleRemoveCoordinator(email)} className="bg-white border border-red-100 text-red-500 px-3 py-2 rounded-xl text-[8px] font-black uppercase tracking-widest hover:bg-red-500 hover:text-white transition-colors shadow-sm">Revoke</button>
+                    {coordinators.length > 0 && (
+                      <div className="mt-8 pt-6 border-t-2 border-dashed border-gray-100">
+                        <h3 className="font-black text-[9px] uppercase text-gray-400 mb-4 tracking-[0.2em]">Active Field Leaders ({coordinators.length})</h3>
+                        <div className="space-y-3 max-h-48 overflow-y-auto custom-scrollbar pr-2">
+                          {coordinators.map((email: string) => (
+                            <div key={email} className="flex justify-between items-center p-4 bg-gray-50 rounded-2xl border border-gray-100 hover:border-gray-200 transition-colors">
+                              <p className="text-xs font-bold text-gray-800 truncate w-[60%]">{email}</p>
+                              <button onClick={() => handleRemoveCoordinator(email)} className="bg-white border border-red-100 text-red-500 px-3 py-2 rounded-xl text-[8px] font-black uppercase tracking-widest hover:bg-red-500 hover:text-white transition-colors shadow-sm">Revoke</button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ========================================== */}
+          {/* TAB 2: ROSTER & CRM */}
+          {/* ========================================== */}
+          {adminTab === 'roster' && (
+            <div className="space-y-6 animate-in fade-in">
+              {/* HORIZONTAL 4-COLUMN GRID */}
+              <div className="grid md:grid-cols-2 xl:grid-cols-4 gap-6">
+                
+                {/* STUDENT SEARCH (Multi-Result) */}
+                <div className="p-6 rounded-[2rem] border-2 border-[#FF5722] bg-[#FFF9F5] shadow-sm">
+                  <h2 className="font-black text-[10px] tracking-[0.2em] uppercase mb-4 text-[#FF5722] flex items-center gap-2"><span className="text-lg">🔎</span> Student Tracker</h2>
+                  <input type="text" placeholder="Search VTU or Name..." value={vtuLookup} onChange={(e) => setVtuLookup(e.target.value)} className="w-full p-4 mb-4 text-sm rounded-2xl outline-none font-black border border-[#FF5722]/30 bg-white shadow-inner focus:border-[#FF5722] transition-colors" />
+                  
+                  {/* Multi-result display */}
+                  <div className="space-y-2 max-h-[300px] overflow-y-auto custom-scrollbar">
+                    {vtuLookup.length >= 2 && (data.users || []).filter((u: any) => 
+                      String(u.vtuNumber).includes(vtuLookup) || 
+                      (u.name && u.name.toLowerCase().includes(vtuLookup.toLowerCase()))
+                    ).slice(0, 10).map((u: any) => (
+                      <div key={u.vtuNumber} onClick={() => setSelectedStudent({studentName: u.name, vtuNumber: u.vtuNumber, dept: u.dept, year: u.year, gender: u.gender, userData: u})} className="p-4 rounded-xl border border-white bg-white cursor-pointer hover:shadow-lg hover:border-[#FF5722] transition-all">
+                        <p className="font-black text-sm text-gray-900 truncate capitalize">{u.name}</p>
+                        <p className="text-[9px] font-bold text-gray-500 mt-1">{u.vtuNumber} • {u.dept} • Yr {u.year}</p>
                       </div>
                     ))}
+                    {vtuLookup.length >= 2 && (data.users || []).filter((u: any) => 
+                      String(u.vtuNumber).includes(vtuLookup) || 
+                      (u.name && u.name.toLowerCase().includes(vtuLookup.toLowerCase()))
+                    ).length === 0 && (
+                      <p className="text-center text-xs text-gray-400 py-6 font-black uppercase">No matches found</p>
+                    )}
                   </div>
                 </div>
-              )}
-            </div>
 
-            {/* MEMBER LOOKUP */}
-            <div className="p-6 md:p-8 rounded-[2.5rem] border-2 border-[#FF5722] bg-[#FFF9F5] shadow-sm">
-              <h2 className="font-black text-[10px] tracking-[0.2em] uppercase mb-4 text-[#FF5722] flex items-center gap-2"><span className="text-lg">🔎</span> Student Tracker</h2>
-              <input type="text" placeholder="Search VTU or Name..." value={vtuLookup} onChange={(e) => setVtuLookup(e.target.value)} className="w-full p-4 mb-4 text-sm rounded-2xl outline-none font-black border border-[#FF5722]/30 bg-white shadow-inner focus:border-[#FF5722] transition-colors" />
-              {searchedUser && (
-                <div onClick={() => setSelectedStudent({studentName: searchedUser.name, vtuNumber: searchedUser.vtuNumber, dept: searchedUser.dept, year: searchedUser.year, gender: searchedUser.gender, userData: searchedUser})} className="p-6 rounded-3xl border-2 border-white bg-white cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all group">
-                  <p className="font-black text-xl text-gray-900 group-hover:text-[#FF5722] transition-colors tracking-tight">{searchedUser.name}</p>
-                  <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mt-2 bg-gray-50 inline-block px-3 py-1 rounded-lg border border-gray-100">{searchedUser.dept} • Yr {searchedUser.year}</p>
-                  <div className="mt-6 pt-4 border-t border-gray-100 flex justify-between items-center">
-                    <span className="text-[9px] font-black uppercase text-gray-400 tracking-[0.2em]">Verified Scans</span>
-                    <span className="font-black text-[#FF5722] text-2xl bg-[#FFF9F5] px-4 py-1 rounded-xl border border-orange-100">{searchedUserAttendance.length}</span>
+                {/* CRM: CLUB MANAGEMENT */}
+                <div className="p-6 rounded-[2rem] border-2 border-blue-500 bg-white shadow-sm">
+                  <h2 className="font-black mb-4 uppercase text-[10px] tracking-[0.2em] text-blue-600 flex items-center gap-2"><span className="text-lg">👥</span> Club CRM</h2>
+                  
+                  <div className="flex gap-2 mb-4 bg-gray-50 p-1 rounded-xl">
+                    <button onClick={() => setCrmTab('members')} className={`flex-1 py-2 rounded-lg font-black text-[9px] uppercase tracking-widest transition ${crmTab === 'members' ? 'bg-blue-600 text-white shadow-md' : 'text-gray-500'}`}>Members</button>
+                    <button onClick={() => setCrmTab('guests')} className={`flex-1 py-2 rounded-lg font-black text-[9px] uppercase tracking-widest transition ${crmTab === 'guests' ? 'bg-purple-600 text-white shadow-md' : 'text-gray-500'}`}>Guests</button>
                   </div>
-                </div>
-              )}
-            </div>
 
-            {/* 👥 CRM: CLUB MANAGEMENT */}
-            <div className="p-6 md:p-8 rounded-[2.5rem] border-2 border-blue-500 bg-white shadow-sm">
-              <h2 className="font-black mb-6 uppercase text-[10px] tracking-[0.2em] text-blue-600 flex items-center gap-2"><span className="text-lg">👥</span> Manage Club Members</h2>
-              
-              {/* Tabs */}
-              <div className="flex gap-2 mb-6 bg-gray-50 p-1 rounded-xl">
-                <button onClick={() => setCrmTab('members')} className={`flex-1 py-3 rounded-lg font-black text-xs uppercase tracking-widest transition ${crmTab === 'members' ? 'bg-blue-600 text-white shadow-md' : 'text-gray-500'}`}>Club Members</button>
-                <button onClick={() => setCrmTab('guests')} className={`flex-1 py-3 rounded-lg font-black text-xs uppercase tracking-widest transition ${crmTab === 'guests' ? 'bg-purple-600 text-white shadow-md' : 'text-gray-500'}`}>Guests / Temp</button>
-              </div>
+                  <div className="grid grid-cols-3 gap-2 mb-4">
+                    <select value={crmFilters.year} onChange={e => setCrmFilters({...crmFilters, year: e.target.value})} className="p-2 bg-gray-50 border border-gray-100 rounded-lg font-bold text-[10px] outline-none">
+                      <option value="All">All Yrs</option><option value="1">Yr 1</option><option value="2">Yr 2</option><option value="3">Yr 3</option><option value="4">Yr 4</option>
+                    </select>
+                    <select value={crmFilters.gender} onChange={e => setCrmFilters({...crmFilters, gender: e.target.value})} className="p-2 bg-gray-50 border border-gray-100 rounded-lg font-bold text-[10px] outline-none">
+                      <option value="All">All</option><option value="Male">M</option><option value="Female">F</option>
+                    </select>
+                    <input type="number" min="0" placeholder="Min" value={crmFilters.minEvents} onChange={e => setCrmFilters({...crmFilters, minEvents: parseInt(e.target.value) || 0})} className="p-2 bg-gray-50 border border-gray-100 rounded-lg font-bold text-[10px] outline-none w-full" />
+                  </div>
 
-              {/* Filters */}
-              <div className="grid grid-cols-3 gap-3 mb-6">
-                <select value={crmFilters.year} onChange={e => setCrmFilters({...crmFilters, year: e.target.value})} className="p-3 bg-gray-50 border border-gray-100 rounded-xl font-bold text-xs outline-none">
-                  <option value="All">All Years</option><option value="1">Year 1</option><option value="2">Year 2</option><option value="3">Year 3</option><option value="4">Year 4</option>
-                </select>
-                <select value={crmFilters.gender} onChange={e => setCrmFilters({...crmFilters, gender: e.target.value})} className="p-3 bg-gray-50 border border-gray-100 rounded-xl font-bold text-xs outline-none">
-                  <option value="All">All Genders</option><option value="Male">Male</option><option value="Female">Female</option>
-                </select>
-                <div className="flex items-center bg-gray-50 border border-gray-100 rounded-xl px-3">
-                  <span className="text-[9px] font-black text-gray-400 uppercase tracking-widest mr-2">Min Events:</span>
-                  <input type="number" min="0" value={crmFilters.minEvents} onChange={e => setCrmFilters({...crmFilters, minEvents: parseInt(e.target.value) || 0})} className="w-full bg-transparent font-black text-blue-600 outline-none" />
-                </div>
-              </div>
-
-              {/* Results */}
-              <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
-                {crmUsers.map((u: any) => (
-                  <div key={u.vtuNumber} className="flex justify-between items-center p-4 border border-gray-100 rounded-2xl hover:border-blue-300 transition group">
-                    <div>
-                      <p className="font-black text-sm text-gray-900 capitalize">{u.name || 'Unknown'}</p>
-                      <p className="text-[10px] font-bold text-gray-500 mt-1">{u.vtuNumber} • Yr {u.year} • {u.dept}</p>
-                    </div>
-                    <div className="flex items-center gap-4">
-                      <div className="flex gap-2">
-                        <div className="text-center bg-blue-50 px-3 py-1 rounded-xl border border-blue-100">
-                          <span className="block text-[8px] font-black uppercase text-blue-400 tracking-widest">Events</span>
-                          <span className="font-black text-blue-600">{u.eventsAttended}</span>
+                  <div className="space-y-2 max-h-[250px] overflow-y-auto custom-scrollbar">
+                    {crmUsers.slice(0, 8).map((u: any) => (
+                      <div key={u.vtuNumber} className="flex justify-between items-center p-3 border border-gray-100 rounded-xl hover:border-blue-300 transition group">
+                        <div className="truncate flex-1">
+                          <p className="font-bold text-xs text-gray-900 capitalize truncate">{u.name || 'Unknown'}</p>
+                          <p className="text-[9px] text-gray-500">{u.vtuNumber}</p>
                         </div>
-                        {crmTab === 'members' && (
-                          <div className={`text-center px-3 py-1 rounded-xl border ${u.strikes >= 2 ? 'bg-red-50 border-red-200' : 'bg-orange-50 border-orange-100'}`}>
-                            <span className={`block text-[8px] font-black uppercase tracking-widest ${u.strikes >= 2 ? 'text-red-500' : 'text-orange-400'}`}>Strikes</span>
-                            <span className={`font-black ${u.strikes >= 2 ? 'text-red-600' : 'text-orange-500'}`}>{u.strikes || 0}/3</span>
-                          </div>
-                        )}
+                        <div className="flex items-center gap-2">
+                          <span className="text-[9px] font-black text-blue-600 bg-blue-50 px-2 py-1 rounded">{u.eventsAttended}</span>
+                          {crmTab === 'members' ? (
+                            <button onClick={() => executeCrmAction('/admin/crm/demote', { vtu: u.vtuNumber }, "Demoted")} className="text-[8px] text-red-500 font-black opacity-0 group-hover:opacity-100">↓</button>
+                          ) : (
+                            <button onClick={() => executeCrmAction('/admin/crm/promote', { vtu: u.vtuNumber }, "Promoted")} className="text-[8px] text-green-500 font-black opacity-0 group-hover:opacity-100">↑</button>
+                          )}
+                        </div>
                       </div>
-                      {crmTab === 'members' ? (
-                        <button onClick={() => executeCrmAction('/admin/crm/demote', { vtu: u.vtuNumber }, "Demoted to Guest")} disabled={isProcessing} className="px-3 py-2 bg-red-50 text-red-600 text-[9px] font-black uppercase tracking-widest rounded-lg opacity-0 group-hover:opacity-100 transition hover:bg-red-500 hover:text-white">Demote</button>
-                      ) : (
-                        <button onClick={() => executeCrmAction('/admin/crm/promote', { vtu: u.vtuNumber }, "Promoted to Member")} disabled={isProcessing} className="px-3 py-2 bg-green-50 text-green-600 text-[9px] font-black uppercase tracking-widest rounded-lg opacity-0 group-hover:opacity-100 transition hover:bg-green-500 hover:text-white">Promote</button>
-                      )}
-                    </div>
+                    ))}
+                    {crmUsers.length === 0 && <p className="text-center text-[10px] font-black text-gray-400 uppercase py-6">No users</p>}
                   </div>
-                ))}
-                {crmUsers.length === 0 && <p className="text-center text-xs font-black text-gray-400 uppercase py-10">No users match criteria</p>}
-              </div>
-            </div>
-
-            {/* ROSTER MANAGEMENT */}
-            <div className="p-6 md:p-8 rounded-[2.5rem] border-2 border-gray-100 bg-white shadow-sm hover:border-gray-200 transition-colors">
-              <h2 className="font-black mb-6 uppercase text-[10px] tracking-[0.2em] text-gray-400 flex items-center gap-2"><span className="text-lg">🗄️</span> Roster Management</h2>
-              
-              <button onClick={handleGlobalExport} className="w-full mb-6 bg-gradient-to-r from-green-500 to-green-600 text-white font-black py-4 rounded-2xl uppercase tracking-widest text-[10px] shadow-lg hover:shadow-xl hover:scale-[1.02] transition-all flex items-center justify-center gap-3">
-                <span className="text-lg">📊</span> Generate Dean's Report (CSV)
-              </button>
-              
-              <div className="relative w-full border-2 border-dashed border-blue-200 bg-blue-50 rounded-2xl p-6 text-center hover:bg-blue-100 hover:border-blue-300 transition-colors cursor-pointer mb-6 group">
-                 <p className="text-[10px] font-black text-blue-600 uppercase tracking-widest group-hover:scale-105 transition-transform">{isUploading ? "Processing CSV..." : "+ Upload Master CSV"}</p>
-                 <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept=".csv" className="absolute inset-0 opacity-0 cursor-pointer" />
-              </div>
-              
-              <div className="flex gap-2">
-                <select value={selectedPurgeYear} onChange={(e) => setSelectedPurgeYear(e.target.value)} className="px-4 py-3 text-xs rounded-xl font-black border border-gray-200 bg-gray-50 outline-none text-gray-600">
-                  <option value="1">Year 1</option><option value="2">Year 2</option><option value="3">Year 3</option><option value="4">Year 4</option>
-                </select>
-                <button onClick={handleYearPurge} className="flex-1 bg-white border border-red-100 text-red-500 font-black rounded-xl text-[10px] uppercase tracking-widest hover:bg-red-500 hover:text-white transition-colors shadow-sm">Purge Year</button>
-              </div>
-
-              {/* SOS BACKUP RESTORE */}
-              <div className="mt-6 pt-6 border-t-2 border-red-100">
-                <h3 className="font-black mb-3 uppercase text-[10px] tracking-[0.2em] text-red-500 flex items-center gap-2"><span className="text-lg">🚨</span> Emergency Recovery</h3>
-                <div className="relative w-full border-2 border-dashed border-red-300 bg-red-50 rounded-2xl p-6 text-center hover:bg-red-100 hover:border-red-400 transition-colors cursor-pointer group">
-                  <p className="text-[10px] font-black text-red-600 uppercase tracking-widest group-hover:scale-105 transition-transform">{isRestoringBackup ? 'Restoring SOS Data...' : '📤 Restore from SOS Backup (.txt)'}</p>
-                  <p className="text-[8px] font-bold text-red-400 mt-1 uppercase tracking-widest">Upload a UBA_EMERGENCY_BACKUP file from coordinator's phone</p>
-                  <input type="file" ref={sosFileInputRef} onChange={handleSOSFileUpload} accept=".txt" className="absolute inset-0 opacity-0 cursor-pointer" />
                 </div>
+
+                {/* ROSTER MANAGEMENT */}
+                <div className="p-6 rounded-[2rem] border-2 border-gray-100 bg-white shadow-sm">
+                  <h2 className="font-black mb-4 uppercase text-[10px] tracking-[0.2em] text-gray-400 flex items-center gap-2"><span className="text-lg">🗄️</span> Master Roster</h2>
+                  
+                  <button onClick={() => setShowExportModal(true)} className="w-full mb-4 bg-gradient-to-r from-green-500 to-green-600 text-white font-black py-3 rounded-xl uppercase tracking-widest text-[9px] shadow-lg hover:shadow-xl transition-all flex items-center justify-center gap-2">
+                    <span>📊</span> Dean's Report
+                  </button>
+                  
+                  <div className="relative w-full border-2 border-dashed border-blue-200 bg-blue-50 rounded-xl p-4 text-center hover:bg-blue-100 transition cursor-pointer mb-4">
+                    <p className="text-[9px] font-black text-blue-600 uppercase tracking-widest">{isUploading ? "Processing..." : "+ Upload CSV"}</p>
+                    <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept=".csv" className="absolute inset-0 opacity-0 cursor-pointer" />
+                  </div>
+                  
+                  <div className="flex gap-2">
+                    <select value={selectedPurgeYear} onChange={(e) => setSelectedPurgeYear(e.target.value)} className="px-3 py-2 text-[10px] rounded-lg font-black border border-gray-200 bg-gray-50 outline-none">
+                      <option value="1">Yr 1</option><option value="2">Yr 2</option><option value="3">Yr 3</option><option value="4">Yr 4</option>
+                    </select>
+                    <button onClick={handleYearPurge} className="flex-1 bg-white border border-red-100 text-red-500 font-black rounded-lg text-[9px] uppercase tracking-widest hover:bg-red-500 hover:text-white transition-colors">Purge</button>
+                  </div>
+                </div>
+
+                {/* SOS RECOVERY */}
+                <div className="p-6 rounded-[2rem] border-2 border-red-200 bg-red-50 shadow-sm">
+                  <h2 className="font-black mb-4 uppercase text-[10px] tracking-[0.2em] text-red-500 flex items-center gap-2"><span className="text-lg">🚨</span> Emergency</h2>
+                  
+                  <div className="relative w-full border-2 border-dashed border-red-300 bg-white rounded-xl p-6 text-center hover:bg-red-50 transition cursor-pointer">
+                    <p className="text-[10px] font-black text-red-600 uppercase tracking-widest">{isRestoringBackup ? 'Restoring...' : '📤 SOS Restore'}</p>
+                    <p className="text-[8px] font-bold text-red-400 mt-2 uppercase">Upload .txt backup</p>
+                    <input type="file" ref={sosFileInputRef} onChange={handleSOSFileUpload} accept=".txt" className="absolute inset-0 opacity-0 cursor-pointer" />
+                  </div>
+                </div>
+
               </div>
             </div>
+          )}
 
-            {/* 🗓️ EVENT SCHEDULING UI */}
-            <div className="p-6 md:p-8 rounded-[2.5rem] border-2 border-orange-500 bg-[#FFF9F5] shadow-sm">
-              <h2 className="font-black mb-6 uppercase text-[10px] tracking-[0.2em] text-orange-500 flex items-center gap-2"><span className="text-lg">🗓️</span> Schedule Future Event</h2>
-              
-              <input type="text" placeholder="Event Title (e.g. Village Drive)" value={scheduleForm.title} onChange={e => setScheduleForm({...scheduleForm, title: e.target.value})} className="w-full p-4 rounded-xl mb-3 outline-none font-bold text-sm bg-white shadow-sm border border-orange-100" />
-              
-              <div className="flex gap-3 mb-3">
-                <input type="date" value={scheduleForm.date} onChange={e => setScheduleForm({...scheduleForm, date: e.target.value})} className="flex-1 p-4 rounded-xl outline-none font-bold text-sm bg-white shadow-sm border border-orange-100 text-gray-600" />
-                <input type="time" value={scheduleForm.time} onChange={e => setScheduleForm({...scheduleForm, time: e.target.value})} className="flex-1 p-4 rounded-xl outline-none font-bold text-sm bg-white shadow-sm border border-orange-100 text-gray-600" />
+          {/* ========================================== */}
+          {/* TAB 3: SCHEDULE */}
+          {/* ========================================== */}
+          {adminTab === 'schedule' && (
+            <div className="max-w-2xl mx-auto animate-in fade-in">
+              <div className="p-8 rounded-[2.5rem] border-2 border-orange-500 bg-[#FFF9F5] shadow-lg">
+                <h2 className="font-black mb-6 uppercase text-xs tracking-[0.2em] text-orange-500 flex items-center gap-3"><span className="text-2xl">🗓️</span> Schedule Future Event</h2>
+                
+                <input type="text" placeholder="Event Title (e.g. Village Drive)" value={scheduleForm.title} onChange={e => setScheduleForm({...scheduleForm, title: e.target.value})} className="w-full p-4 rounded-xl mb-4 outline-none font-bold text-sm bg-white shadow-sm border border-orange-100" />
+                
+                <div className="flex gap-4 mb-4">
+                  <input type="date" value={scheduleForm.date} onChange={e => setScheduleForm({...scheduleForm, date: e.target.value})} className="flex-1 p-4 rounded-xl outline-none font-bold text-sm bg-white shadow-sm border border-orange-100 text-gray-600" />
+                  <input type="time" value={scheduleForm.time} onChange={e => setScheduleForm({...scheduleForm, time: e.target.value})} className="flex-1 p-4 rounded-xl outline-none font-bold text-sm bg-white shadow-sm border border-orange-100 text-gray-600" />
+                </div>
+
+                <input type="text" placeholder="Venue (Optional)" value={scheduleForm.venue} onChange={e => setScheduleForm({...scheduleForm, venue: e.target.value})} className="w-full p-4 rounded-xl mb-6 outline-none font-bold text-sm bg-white shadow-sm border border-orange-100" />
+
+                <p className="text-[10px] font-black uppercase tracking-widest text-gray-400 mb-3">Target Audience (Leave blank for all)</p>
+                <div className="flex gap-3 mb-6">
+                  {['1', '2', '3', '4'].map(yr => (
+                    <button key={yr} onClick={() => toggleAudience(yr)} className={`flex-1 py-3 rounded-xl font-black text-sm transition ${scheduleForm.targetAudience.includes(yr) ? 'bg-orange-500 text-white shadow-md' : 'bg-white border border-orange-200 text-orange-400 hover:bg-orange-50'}`}>Year {yr}</button>
+                  ))}
+                </div>
+
+                <p className="text-[10px] font-black uppercase tracking-widest text-gray-400 mb-3">Base Roster CSV (Optional)</p>
+                <div className="relative w-full border-2 border-dashed border-orange-200 bg-white rounded-xl p-6 text-center mb-6 hover:bg-orange-50 transition cursor-pointer">
+                  <p className="text-xs font-bold text-orange-500">{scheduleManifest.length > 0 ? `✓ ${scheduleManifest.length} Students Loaded` : '+ Upload CSV'}</p>
+                  <input type="file" ref={scheduleFileRef} onChange={handleScheduleCSV} accept=".csv" className="absolute inset-0 opacity-0 cursor-pointer" />
+                </div>
+
+                <button onClick={submitSchedule} disabled={isProcessing} className="w-full bg-gray-900 text-white font-black py-5 rounded-2xl uppercase tracking-widest text-xs shadow-lg hover:bg-black transition disabled:opacity-50">
+                  {isProcessing ? 'Scheduling...' : '📅 Schedule Event'}
+                </button>
               </div>
-
-              <input type="text" placeholder="Venue (Optional)" value={scheduleForm.venue} onChange={e => setScheduleForm({...scheduleForm, venue: e.target.value})} className="w-full p-4 rounded-xl mb-4 outline-none font-bold text-sm bg-white shadow-sm border border-orange-100" />
-
-              <p className="text-[9px] font-black uppercase tracking-widest text-gray-400 mb-2">Target Audience (Leave blank for all)</p>
-              <div className="flex gap-2 mb-4">
-                {['1', '2', '3', '4'].map(yr => (
-                  <button key={yr} onClick={() => toggleAudience(yr)} className={`flex-1 py-2 rounded-lg font-black text-xs transition ${scheduleForm.targetAudience.includes(yr) ? 'bg-orange-500 text-white' : 'bg-white border border-orange-200 text-orange-400'}`}>Yr {yr}</button>
-                ))}
-              </div>
-
-              <p className="text-[9px] font-black uppercase tracking-widest text-gray-400 mb-2">Base Roster CSV (Optional)</p>
-              <div className="relative w-full border-2 border-dashed border-orange-200 bg-white rounded-xl p-4 text-center mb-6 hover:bg-orange-50 transition cursor-pointer">
-                <p className="text-[10px] font-bold text-orange-500">{scheduleManifest.length > 0 ? `${scheduleManifest.length} Students Loaded` : '+ Upload CSV'}</p>
-                <input type="file" ref={scheduleFileRef} onChange={handleScheduleCSV} accept=".csv" className="absolute inset-0 opacity-0 cursor-pointer" />
-              </div>
-
-              <button onClick={submitSchedule} disabled={isProcessing} className="w-full bg-gray-900 text-white font-black py-4 rounded-2xl uppercase tracking-widest text-[10px] shadow-lg hover:bg-black transition disabled:opacity-50">
-                {isProcessing ? 'Scheduling...' : 'Schedule Event'}
-              </button>
             </div>
+          )}
 
-          </div>
         </main>
       </div>
     </ProtectedRoute>

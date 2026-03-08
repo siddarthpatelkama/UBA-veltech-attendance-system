@@ -20,7 +20,7 @@ export default function HomePage() {
   const [leaderboard, setLeaderboard] = useState<any[]>([]);
   
   // --- UI NAVIGATION & MODAL STATES ---
-  const [activeView, setActiveView] = useState<'home' | 'history' | 'rankings'>('home');
+  const [activeView, setActiveView] = useState<'home' | 'history' | 'rankings' | 'excuses'>('home');
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [showAboutModal, setShowAboutModal] = useState(false);
   const [showIosPrompt, setShowIosPrompt] = useState(false);
@@ -456,7 +456,7 @@ export default function HomePage() {
               {isOffline && <span className="text-[9px] font-black text-red-500 border border-red-500 px-2 py-1 rounded">Offline</span>}
               
               <div className="hidden md:flex gap-6 items-center">
-                {['home', 'history', 'rankings'].map((t) => (
+                {['home', 'history', 'rankings', 'excuses'].map((t) => (
                   <button 
                     key={t} 
                     onClick={() => { 
@@ -464,9 +464,13 @@ export default function HomePage() {
                       // If they click history or rankings, FORCE a database sync
                       if (t !== 'home' && auth.currentUser) fetchUserStatus(auth.currentUser, false); 
                     }} 
-                    className={`text-[10px] font-black uppercase tracking-widest ${activeView === t ? 'text-[#FF5722]' : 'text-gray-400'}`}
+                    className={`relative text-[10px] font-black uppercase tracking-widest ${activeView === t ? 'text-[#FF5722]' : 'text-gray-400'}`}
                   >
                     {t}
+                    {/* Add notification dot if there are pending excuses */}
+                    {t === 'excuses' && pendingExcuses.length > 0 && (
+                      <span className="absolute -top-2 -right-3 h-2 w-2 bg-red-500 rounded-full animate-ping"></span>
+                    )}
                   </button>
                 ))}
                 <button onClick={() => signOut(auth)} className="text-[10px] font-black uppercase tracking-widest text-red-500 hover:bg-red-50 px-3 py-1 rounded transition-colors">Logout</button>
@@ -481,7 +485,7 @@ export default function HomePage() {
 
         {isMenuOpen && (
           <div className="absolute top-full left-0 w-full bg-white border-b-2 border-[#FF5722] p-6 space-y-6 md:hidden animate-in slide-in-from-top-4">
-             {['home', 'history', 'rankings'].map((t) => (
+             {['home', 'history', 'rankings', 'excuses'].map((t) => (
                 <button 
                   key={t} 
                   onClick={() => { 
@@ -490,9 +494,12 @@ export default function HomePage() {
                     // If they click history or rankings, FORCE a database sync
                     if (t !== 'home' && auth.currentUser) fetchUserStatus(auth.currentUser, false);
                   }} 
-                  className="block w-full text-left font-black uppercase italic text-2xl text-gray-900"
+                  className="relative block w-full text-left font-black uppercase italic text-2xl text-gray-900"
                 >
                   {t}
+                  {t === 'excuses' && pendingExcuses.length > 0 && (
+                    <span className="absolute top-1/2 -translate-y-1/2 ml-3 h-3 w-3 bg-red-500 rounded-full animate-pulse"></span>
+                  )}
                 </button>
              ))}
              <button onClick={() => signOut(auth)} className="w-full py-4 bg-red-50 text-red-500 font-black rounded-2xl uppercase text-xs">Logout</button>
@@ -711,6 +718,54 @@ export default function HomePage() {
                   </div>
                 ))}
              </div>
+          </div>
+        )}
+
+        {/* --- DEDICATED EXCUSES TAB --- */}
+        {activeView === 'excuses' && (
+          <div className="max-w-3xl mx-auto space-y-8 animate-in slide-in-from-bottom-8">
+             <div className="flex justify-between items-end border-b-2 border-gray-100 pb-6">
+                <h2 className="text-4xl font-black uppercase italic tracking-tighter">Pending Excuses</h2>
+                <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Missed Trips (24H)</p>
+             </div>
+
+             {pendingExcuses.length === 0 ? (
+               <div className="bg-gray-50 border-2 border-dashed border-gray-200 rounded-[3rem] p-16 text-center">
+                 <span className="text-4xl grayscale opacity-30 mb-4 block">✅</span>
+                 <p className="text-gray-400 text-xs font-black uppercase tracking-widest">You have no pending strikes or excuses.</p>
+               </div>
+             ) : (
+               <div className="space-y-4">
+                 {pendingExcuses.map((ex, i) => (
+                   <div key={i} className="bg-white rounded-[2rem] p-6 border-2 border-amber-200 shadow-lg flex flex-col md:flex-row justify-between items-start md:items-center gap-4 group hover:border-amber-400 transition-all">
+                     <div>
+                       <span className="text-[9px] font-black bg-amber-100 text-amber-700 px-3 py-1 rounded-full uppercase tracking-widest mb-2 inline-block">Action Required</span>
+                       <h3 className="font-black text-lg text-gray-900 uppercase tracking-tight">{ex.eventTitle || ex.sessionId}</h3>
+                       <p className="text-xs font-bold text-gray-500 mt-1">If you have a valid reason for missing this event, submit it now. GPS verification is required.</p>
+                     </div>
+                     <button 
+                       onClick={() => setShowExcuseModal(ex)} 
+                       className="w-full md:w-auto bg-amber-500 text-white px-6 py-4 rounded-xl font-black text-[10px] uppercase tracking-widest shadow-md hover:bg-amber-600 active:scale-95 transition-all whitespace-nowrap"
+                     >
+                       Submit Excuse 📍
+                     </button>
+                   </div>
+                 ))}
+               </div>
+             )}
+
+             {/* Strike Warning Banner */}
+             {(userData?.strikes || 0) > 0 && (
+               <div className="bg-red-50 border-2 border-red-200 rounded-3xl p-6 mt-8">
+                 <div className="flex justify-between items-center">
+                   <div>
+                     <h3 className="font-black uppercase text-red-700 text-sm">⚠️ Strike Warning</h3>
+                     <p className="text-xs text-red-600 mt-1">You have {userData?.strikes}/3 strikes. At 3 strikes you will be auto-demoted to Guest status.</p>
+                   </div>
+                   <span className="text-3xl font-black text-red-500">{userData?.strikes}/3</span>
+                 </div>
+               </div>
+             )}
           </div>
         )}
 

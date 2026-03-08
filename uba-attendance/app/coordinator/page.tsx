@@ -34,7 +34,6 @@ export default function CoordinatorPage() {
   const [newTitle, setNewTitle] = useState('');
   const [selectedMeetingId, setSelectedMeetingId] = useState<string | null>(null);
   const [manualVtu, setManualVtu] = useState('');
-  const [manualCategory, setManualCategory] = useState('UBA Member'); // FEATURE 9: Taxonomy
   const [newPhaseTitle, setNewPhaseTitle] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [filterMonth, setFilterMonth] = useState('All'); 
@@ -82,6 +81,7 @@ export default function CoordinatorPage() {
   const [excuses, setExcuses] = useState<any[]>([]);
   const [selectedExcuse, setSelectedExcuse] = useState<any>(null);
   const [showExcuses, setShowExcuses] = useState(false);
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const sosFileInputRef = useRef<HTMLInputElement>(null);
@@ -416,10 +416,21 @@ export default function CoordinatorPage() {
           setScannerSuccess(`${vtu} VERIFIED`);
           setTimeout(() => setScannerSuccess(''), 1500);
 
+          // --- AUTO-FETCH NAME FOR CAMERA SCAN ---
+          const masterRoster = JSON.parse(localStorage.getItem('uba_master_roster') || '[]');
+          const usersCacheLocal = JSON.parse(localStorage.getItem('uba_users_cache') || '[]');
+          const currentMeeting = meetingsRef.current?.find((m:any) => m.id === meetingIdToUse);
+          const dbUser = masterRoster.find((u:any) => String(u.vtuNumber) === String(vtu)) || usersCacheLocal.find((u:any) => String(u.vtuNumber) === String(vtu));
+          const manifestUser = currentMeeting?.manifest?.find((m:any) => String(m.vtu) === String(vtu));
+          const resolvedName = dbUser?.name || manifestUser?.name || `Guest ${vtu}`;
+          const autoCategory = dbUser ? (dbUser.isGuest ? 'Guest' : 'UBA Member') : 'Guest';
+          // ---------------------------------------
+
           if (isOfflineMode) {
               const newScan = { 
                 meetingId: meetingIdToUse, action: 'add', vtu: vtu, isOverride: false, enteredBy: auth.currentUser?.email,
-                studentName: `Scanned: ${vtu}`, timestamp: Date.now(), dateString: new Date().toLocaleString(), vtuNumber: vtu, phaseId: phaseIdToUse,
+                studentName: resolvedName, overrideCategory: autoCategory,
+                timestamp: Date.now(), dateString: new Date().toLocaleString(), vtuNumber: vtu, phaseId: phaseIdToUse,
                 ...(isEmergency ? { isEmergency: true, emergencyDeviceId: deviceId } : {})
               };
               const updated = [...localOfflineScansRef.current, newScan];
@@ -431,7 +442,11 @@ export default function CoordinatorPage() {
                 await fetch(`${API_URL}/meeting/update-manifest`, {
                   method: 'POST', 
                   headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                  body: JSON.stringify({ meetingId: meetingIdToUse, action: 'add', vtu, isOverride: false, enteredBy: auth.currentUser?.email, phaseId: phaseIdToUse })
+                  body: JSON.stringify({ 
+                    meetingId: meetingIdToUse, action: 'add', vtu, isOverride: false, 
+                    studentName: resolvedName, category: autoCategory,
+                    enteredBy: auth.currentUser?.email, phaseId: phaseIdToUse 
+                  })
                 });
                 fetchData(true);
              };
@@ -502,6 +517,27 @@ export default function CoordinatorPage() {
     finally { setTimeout(() => { setIsCreating(false); setCreationStatus(''); }, 500); }
   };
 
+  const handleActivateScheduled = async () => {
+    setIsProcessing(true);
+    const token = await auth.currentUser?.getIdToken();
+    try {
+      const res = await fetch(`${API_URL}/meeting/activate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ meetingId: selectedMeetingId })
+      });
+      if (res.ok) {
+        showToast("Scheduled Session is now LIVE! 🔴");
+        fetchData(true);
+      } else {
+        showToast("Failed to activate session.");
+      }
+    } catch (e) {
+      showToast("Network error.");
+    }
+    setIsProcessing(false);
+  };
+
   const handleFileUpload = (e: any) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -552,31 +588,50 @@ export default function CoordinatorPage() {
     setIsProcessing(true);
     const token = await auth.currentUser?.getIdToken();
     
-    // FIXED: Split by spaces or commas, preserve alphanumeric
     const vtus = manualVtu.split(/[\s,]+/).filter(v => v.length > 0);
     
     const displayMeeting = meetings.find(m => m.id === selectedMeetingId);
     const activePhase = displayMeeting?.type === 'verifiable' ? (displayMeeting.phases || []).find((p:any) => p.status === 'active') : null;
     const targetPhaseId = overridePhaseId || (activePhase ? activePhase.id : 'none');
 
+    // --- AUTO-FETCH REAL NAME & STATUS ---
+    const masterRoster = JSON.parse(localStorage.getItem('uba_master_roster') || '[]');
+
     if (isOfflineMode) {
       const vault = JSON.parse(localStorage.getItem('uba_offline_vault') || '[]');
-      const newScans = vtus.map(v => ({
-        meetingId: selectedMeetingId, action: 'add', vtu: v.toUpperCase().trim(),
-        studentName: `Manual: ${v.toUpperCase().trim()}`, timestamp: Date.now(), isOverride: true,
-        overrideCategory: manualCategory, // FEATURE 9: Taxonomy
-        enteredBy: auth.currentUser?.email || 'Offline_Coord', phaseId: targetPhaseId, isEmergency: isOfflineMode,
-        vtuNumber: v.toUpperCase().trim(), dateString: new Date().toLocaleString()
-      }));
+      const newScans = vtus.map(v => {
+        const vtuToUse = v.toUpperCase().trim();
+        const dbUser = masterRoster.find((u:any) => String(u.vtuNumber) === vtuToUse) || users.find((u:any) => String(u.vtuNumber) === vtuToUse);
+        const manifestUser = displayMeeting?.manifest?.find((m:any) => String(m.vtu) === vtuToUse);
+        
+        const resolvedName = dbUser?.name || manifestUser?.name || `Guest ${vtuToUse}`;
+        const autoCategory = dbUser ? (dbUser.isGuest ? 'Guest' : 'UBA Member') : 'Guest';
+
+        return {
+          meetingId: selectedMeetingId, action: 'add', vtu: vtuToUse,
+          studentName: resolvedName, timestamp: Date.now(), isOverride: true,
+          overrideCategory: autoCategory,
+          enteredBy: auth.currentUser?.email || 'Offline_Coord', phaseId: targetPhaseId, isEmergency: isOfflineMode,
+          vtuNumber: vtuToUse, dateString: new Date().toLocaleString()
+        };
+      });
       const updatedVault = [...vault, ...newScans];
       localStorage.setItem('uba_offline_vault', JSON.stringify(updatedVault));
       setLocalOfflineScans(updatedVault);
       showToast(`${vtus.length} VTUs injected into Vault`);
     } else {
       for (const v of vtus) {
-        // FIXED: Kept alphanumeric
         const vtuToUse = v.toUpperCase().trim();
-        const payload = { meetingId: selectedMeetingId, action: 'add', vtu: vtuToUse, isOverride: true, category: manualCategory, enteredBy: auth.currentUser?.email, phaseId: targetPhaseId };
+        const dbUser = masterRoster.find((u:any) => String(u.vtuNumber) === vtuToUse) || users.find((u:any) => String(u.vtuNumber) === vtuToUse);
+        const manifestUser = displayMeeting?.manifest?.find((m:any) => String(m.vtu) === vtuToUse);
+        
+        const resolvedName = dbUser?.name || manifestUser?.name || `Guest ${vtuToUse}`;
+        const autoCategory = dbUser ? (dbUser.isGuest ? 'Guest' : 'UBA Member') : 'Guest';
+
+        const payload = { 
+          meetingId: selectedMeetingId, action: 'add', vtu: vtuToUse, isOverride: true, 
+          category: autoCategory, studentName: resolvedName, enteredBy: auth.currentUser?.email, phaseId: targetPhaseId 
+        };
         await fetch(`${API_URL}/meeting/update-manifest`, {
           method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
           body: JSON.stringify(payload)
@@ -586,7 +641,7 @@ export default function CoordinatorPage() {
       showToast(`${vtus.length} Manual Override(s) Verified`);
     }
     setManualVtu('');
-    setTimeout(() => setIsProcessing(false), 30000);
+    setTimeout(() => setIsProcessing(false), 1000);
   };
 
   const handleLocalRemove = (vtuToRemove: string) => {
@@ -960,9 +1015,9 @@ export default function CoordinatorPage() {
           </div>
         )}
 
-        {/* INLINE NAVBAR (Anti-Collision Layout) */}
-        <nav className="bg-white border-b-2 border-[#FF5722] p-3 md:p-4 sticky top-0 z-40 shadow-sm">
-          <div className="max-w-7xl mx-auto flex flex-wrap justify-center md:justify-between items-center gap-3">
+        {/* INLINE NAVBAR WITH HAMBURGER DROPDOWN */}
+        <nav className="bg-white border-b-2 border-[#FF5722] p-3 md:p-4 sticky top-0 z-40 shadow-sm relative">
+          <div className="max-w-7xl mx-auto flex flex-wrap justify-between items-center gap-3">
             <div className="flex items-center gap-3">
               <img src="/uba-logo.png" alt="UBA Logo" className="h-8 w-8 md:h-10 md:w-10 object-contain rounded-full" />
               <h1 className="text-lg md:text-xl font-black tracking-tighter uppercase text-gray-900 italic">UBA CLUB</h1>
@@ -975,20 +1030,40 @@ export default function CoordinatorPage() {
                 {isOfflineMode ? '● Vault' : '● Online'}
               </button>
               <button onClick={() => fetchData(false)} className="text-[9px] md:text-xs font-black px-3 py-2 md:px-4 md:py-2 rounded-xl uppercase border-2 border-gray-200 text-gray-500 hover:bg-gray-100 transition tracking-widest">Sync</button>
-              <button onClick={handleSafeLogout} className="text-[9px] md:text-xs font-black px-3 py-2 md:px-4 md:py-2 rounded-xl uppercase tracking-widest border-2 border-[#111827] text-[#111827] hover:bg-[#111827] hover:text-white transition">Logout</button>
+              <button onClick={handleSafeLogout} className="hidden md:block text-[9px] md:text-xs font-black px-3 py-2 md:px-4 md:py-2 rounded-xl uppercase tracking-widest border-2 border-[#111827] text-[#111827] hover:bg-[#111827] hover:text-white transition">Logout</button>
+              
+              {/* HAMBURGER BUTTON */}
+              <button onClick={() => setIsMenuOpen(!isMenuOpen)} className="p-2 bg-gray-50 border border-gray-200 rounded-xl hover:bg-gray-100 transition-colors ml-1 relative">
+                <div className={`w-5 h-0.5 bg-gray-600 mb-1.5 transition-all ${isMenuOpen ? 'rotate-45 translate-y-2' : ''}`}></div>
+                <div className={`w-5 h-0.5 bg-gray-600 mb-1.5 transition-all ${isMenuOpen ? 'opacity-0' : ''}`}></div>
+                <div className={`w-5 h-0.5 bg-gray-600 transition-all ${isMenuOpen ? '-rotate-45 -translate-y-2' : ''}`}></div>
+                {/* Red dot if there are pending excuses */}
+                {excuses.length > 0 && <span className="absolute -top-1 -right-1 h-3 w-3 bg-red-500 border-2 border-white rounded-full"></span>}
+              </button>
             </div>
           </div>
-        </nav>
 
-        {/* 📥 EXCUSE INBOX TOGGLE */}
-        {excuses.length > 0 && (
-          <div className="max-w-xl mx-auto w-full p-4">
-            <button onClick={() => setShowExcuses(!showExcuses)} className="w-full bg-orange-100 border-2 border-orange-300 text-orange-800 py-4 rounded-2xl font-black text-xs uppercase tracking-widest flex items-center justify-between px-6 shadow-sm">
-              <span>📥 Pending Excuses ({excuses.length})</span>
-              <span>{showExcuses ? 'Close' : 'Review'}</span>
-            </button>
-          </div>
-        )}
+          {/* DROPDOWN MENU */}
+          {isMenuOpen && (
+            <div className="absolute top-full right-4 mt-2 w-64 bg-white border-2 border-gray-100 rounded-2xl shadow-2xl p-2 z-50 animate-in slide-in-from-top-2">
+              <button 
+                onClick={() => { setShowExcuses(!showExcuses); setIsMenuOpen(false); }} 
+                className="w-full flex justify-between items-center p-4 rounded-xl hover:bg-orange-50 transition-colors text-left"
+              >
+                <span className="font-black text-xs uppercase tracking-widest text-gray-800 flex items-center gap-2">
+                  📥 Excuses Inbox
+                </span>
+                {excuses.length > 0 && (
+                  <span className="bg-red-500 text-white text-[9px] font-black px-2 py-1 rounded-md">{excuses.length}</span>
+                )}
+              </button>
+              <div className="h-px bg-gray-100 w-full my-1 md:hidden"></div>
+              <button onClick={handleSafeLogout} className="md:hidden w-full text-left p-4 rounded-xl font-black text-xs uppercase tracking-widest text-red-500 hover:bg-red-50 transition-colors">
+                Logout
+              </button>
+            </div>
+          )}
+        </nav>
 
         {/* EXCUSE MODAL */}
         {selectedExcuse && (
@@ -1196,14 +1271,7 @@ export default function CoordinatorPage() {
                       ) : (
                         <div className="flex flex-col md:flex-row gap-3">
                           <div className="flex gap-2 flex-1">
-                            {/* FEATURE 9 DROPDOWN */}
-                            <select value={manualCategory} onChange={(e) => setManualCategory(e.target.value)} className="p-3 border border-gray-100 rounded-xl outline-none font-bold text-[10px] uppercase bg-white shadow-sm text-[#FF5722] cursor-pointer">
-                              <option value="UBA Member">UBA</option>
-                              <option value="NSS">NSS</option>
-                              <option value="Guest">Guest</option>
-                              <option value="Faculty">Faculty</option>
-                            </select>
-                            <input type="text" value={manualVtu} onChange={(e) => setManualVtu(e.target.value)} placeholder="VTU..." className="flex-1 p-4 border border-gray-100 rounded-2xl font-mono outline-none bg-white font-black text-sm shadow-inner" />
+                            <input type="text" value={manualVtu} onChange={(e) => setManualVtu(e.target.value.toUpperCase())} placeholder="VTU Number..." className="flex-1 p-4 border border-gray-100 rounded-2xl font-mono outline-none bg-white font-black text-sm shadow-inner" />
                             <button onClick={() => handleManualAdd('initial')} disabled={isProcessing} className="bg-white border-2 border-gray-200 text-gray-800 px-6 py-3 font-black rounded-xl uppercase text-[10px] tracking-widest hover:border-gray-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">{isProcessing ? 'Injecting...' : 'Inject'}</button>
                           </div>
                           <div className="relative overflow-hidden w-full md:w-auto border-2 font-black rounded-xl cursor-pointer transition bg-white border-[#FF5722] text-[#FF5722] hover:bg-orange-50">
@@ -1271,19 +1339,21 @@ export default function CoordinatorPage() {
                             <div className="w-full border-t border-[#FF5722]/20 pt-4">
                                <h3 className="font-black mb-3 uppercase text-[9px] tracking-widest text-gray-400 text-center">Manual Inject</h3>
                                <div className="flex gap-2">
-                                 {/* FEATURE 9 DROPDOWN */}
-                                 <select value={manualCategory} onChange={(e) => setManualCategory(e.target.value)} className="p-3 border border-gray-100 rounded-xl outline-none font-bold text-[10px] uppercase bg-white shadow-sm text-[#FF5722] cursor-pointer">
-                                   <option value="UBA Member">UBA</option>
-                                   <option value="NSS">NSS</option>
-                                   <option value="Guest">Guest</option>
-                                   <option value="Faculty">Faculty</option>
-                                 </select>
                                  <input type="text" value={manualVtu} onChange={(e)=>setManualVtu(e.target.value.toUpperCase())} placeholder="VTU..." className="flex-1 p-3 text-sm border border-gray-100 rounded-xl outline-none font-mono font-black text-center bg-white shadow-sm" onKeyDown={(e) => { if (e.key === 'Enter') handleManualAdd(); }}/>
                                  <button onClick={() => handleManualAdd()} disabled={isProcessing} className="bg-gray-200 text-gray-800 px-4 rounded-xl font-black text-[10px] uppercase hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed">{isProcessing ? 'Adding...' : 'Add'}</button>
                                </div>
                             </div>
                           </div>
                           )
+                        ) : displayMeeting.status === 'scheduled' ? (
+                          <div className="flex flex-col items-center justify-center p-8 rounded-[3.5rem] border-2 border-dashed border-[#FF5722]/40 bg-[#FFF9F5] relative text-center shadow-inner">
+                             <span className="text-5xl mb-4 animate-bounce">⏳</span>
+                             <h3 className="font-black text-xl text-[#FF5722] uppercase tracking-widest">Scheduled Event</h3>
+                             <p className="text-xs font-bold text-gray-500 mt-2 mb-6 uppercase tracking-widest">Date: {displayMeeting.date} @ {displayMeeting.time}</p>
+                             <button onClick={handleActivateScheduled} disabled={isProcessing} className="bg-[#FF5722] text-white px-8 py-4 rounded-2xl font-black uppercase tracking-widest shadow-xl hover:bg-[#E64A19] hover:-translate-y-1 transition-all disabled:opacity-50">
+                               {isProcessing ? 'Starting...' : 'Start Session Now'}
+                             </button>
+                          </div>
                         ) : (
                           <div className="flex flex-col items-center justify-center p-8 rounded-[3.5rem] border-2 border-gray-100 bg-gray-50 relative text-center shadow-inner">
                              <span className="text-5xl mb-4 grayscale opacity-40">🔒</span>
@@ -1538,8 +1608,16 @@ export default function CoordinatorPage() {
         const masterRoster = JSON.parse(localStorage.getItem('uba_master_roster') || '[]');
         const vtu = selectedStudent.vtuNumber || selectedStudent.vtu;
         const studentContact = masterRoster.find((u:any) => String(u.vtuNumber) === String(vtu)) || selectedStudent;
-        const phoneNum = studentContact.phone || 'N/A';
-        const studentName = studentContact.name || selectedStudent.studentName || 'Student';
+        
+        // Check current meeting manifest in case they are from CSV upload
+        const currentMeeting = meetings.find(m => m.id === selectedMeetingId);
+        const manifestUser = currentMeeting?.manifest?.find((m:any) => String(m.vtu) === String(vtu));
+        
+        const phoneNum = studentContact.phone || manifestUser?.phone || 'N/A';
+        const studentName = studentContact.name || manifestUser?.name || selectedStudent.studentName || 'Student';
+        
+        const dept = studentContact.dept || studentContact.userData?.dept || selectedStudent.dept || manifestUser?.dept;
+        const year = studentContact.year || studentContact.userData?.year || selectedStudent.year || manifestUser?.year;
         const msg = `Hi ${studentName}, this is the UBA Student Coordinator. Your attendance verification is pending. Please contact your nearby coordinator to verify immediately. Attendance closes soon.`;
         const encodedMsg = encodeURIComponent(msg);
         return (
@@ -1561,11 +1639,11 @@ export default function CoordinatorPage() {
               <div className="grid grid-cols-2 gap-4 mb-6">
                 <div className="bg-gray-50 p-3 rounded-xl border border-gray-100">
                   <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest mb-1">Department</p>
-                  <p className="text-sm font-bold text-gray-800">{selectedStudent.department || selectedStudent.dept || selectedStudent.userData?.dept || 'N/A'}</p>
+                  <p className="text-sm font-bold text-gray-800">{dept || 'Unknown'}</p>
                 </div>
                 <div className="bg-gray-50 p-3 rounded-xl border border-gray-100">
                   <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest mb-1">Year</p>
-                  <p className="text-sm font-bold text-gray-800">{selectedStudent.year || selectedStudent.userData?.year || 'N/A'}</p>
+                  <p className="text-sm font-bold text-gray-800">{year || 'Unknown'}</p>
                 </div>
               </div>
               <h4 className="text-xs font-black uppercase tracking-widest text-gray-400 mb-3 border-b pb-2">Verified Field History</h4>
