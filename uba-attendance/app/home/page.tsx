@@ -45,6 +45,15 @@ export default function HomePage() {
   // --- PERMANENT DEVICE ID STATE ---
   const [deviceId, setDeviceId] = useState<string>('');
 
+  // --- PENDING EXCUSES STATES ---
+  const [pendingExcuses, setPendingExcuses] = useState<any[]>([]);
+  const [showExcuseModal, setShowExcuseModal] = useState<any>(null);
+  const [excuseReason, setExcuseReason] = useState('');
+  const [isSubmittingExcuse, setIsSubmittingExcuse] = useState(false);
+
+  // --- UPCOMING EVENTS STATE ---
+  const [upcomingEvents, setUpcomingEvents] = useState<any[]>([]);
+
   const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://uba-veltech-attendance-backend-system.onrender.com";
 
   // ==========================================
@@ -105,7 +114,8 @@ export default function HomePage() {
   // ==========================================
   // 2. AUTH & DATA FETCHING
   // ==========================================
-  const fetchUserStatus = async (user: any) => {
+  // --- FEATURE 11: ZERO-READ BOOT ARCHITECTURE ---
+  const fetchUserStatus = async (user: any, skipNetwork = false) => {
     // 1. LOAD FROM CACHE IMMEDIATELY (Instant UI)
     const cachedProfile = localStorage.getItem('uba_student_profile');
     const cachedHistory = localStorage.getItem('uba_student_history');
@@ -118,12 +128,17 @@ export default function HomePage() {
         setLoading(false); // Stop spinner immediately!
     }
 
+    // 🛑 ZERO-READ LOCK: If they are just looking at the QR code and have cache, DO NOT hit Firebase.
+    if (skipNetwork && cachedProfile) {
+        return; 
+    }
+
     if (!navigator.onLine) {
         setLoading(false);
         return; // Stop here if totally offline
     }
 
-    // 2. FETCH FRESH DATA IN BACKGROUND
+    // 2. FETCH FRESH DATA IN BACKGROUND (Only runs when explicitly called)
     try {
       const token = await user.getIdToken();
       const headers = {
@@ -161,6 +176,32 @@ export default function HomePage() {
       localStorage.setItem('uba_student_profile', JSON.stringify(combinedUserData));
       localStorage.setItem('uba_student_history', JSON.stringify(historyData.history || []));
       localStorage.setItem('uba_student_leaderboard', JSON.stringify(historyData.leaderboard || []));
+
+      // Fetch pending excuses for this student
+      if (combinedUserData.vtuNumber) {
+        const excuseRes = await fetch(`${API_URL}/meeting/excuse/list`, { headers });
+        if (excuseRes.ok) {
+          const d = await excuseRes.json();
+          const myExcuses = (d.excuses || []).filter((e: any) => e.vtu === combinedUserData.vtuNumber && e.status === 'pending');
+          setPendingExcuses(myExcuses);
+        }
+      }
+
+      // --- Fetch Upcoming Scheduled Events ---
+      const meetRes = await fetch(`${API_URL}/meetings?skipRoster=true`, { headers });
+      if (meetRes.ok) {
+        const d = await meetRes.json();
+        const myYear = combinedUserData.year || '1'; // Fallback
+        
+        const scheduled = (d.meetings || []).filter((m:any) => {
+          if (m.isDeleted) return false; // TOMBSTONE FILTER
+          if (m.status !== 'scheduled') return false;
+          if (!m.targetAudience || m.targetAudience.length === 0) return true; // Open to all
+          return m.targetAudience.includes(myYear.toString()); // Locked to specific year
+        });
+        setUpcomingEvents(scheduled);
+      }
+      // -------------------------------------------------------
       
     } catch (err) { 
       console.error("Background Fetch Error:", err);
@@ -172,7 +213,7 @@ export default function HomePage() {
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (user) => {
       if (!user) router.replace('/login');
-      else fetchUserStatus(user);
+      else fetchUserStatus(user, true); // <-- Pass TRUE to block background reads on boot
     });
     return () => unsub();
   }, [isOffline]);
@@ -243,6 +284,47 @@ export default function HomePage() {
        document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [userData, deviceId]);
+
+  // ==========================================
+  // 3B. EXCUSE SUBMISSION WITH GEOLOCATION
+  // ==========================================
+  const handleSubmitExcuse = async (sessionId: string) => {
+    setIsSubmittingExcuse(true);
+    try {
+      const token = localStorage.getItem('uba_token');
+      if (!token) throw new Error('Not authenticated');
+
+      // Get user's GPS coordinates
+      const position: GeolocationPosition = await new Promise((resolve, reject) => 
+        navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 10000 })
+      );
+      const { latitude, longitude } = position.coords;
+
+      const res = await fetch(`${API_URL}/meeting/excuse/submit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ sessionId, reason: excuseReason, lat: latitude, lng: longitude })
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to submit excuse');
+
+      alert('Excuse submitted! Awaiting coordinator review.');
+      setShowExcuseModal(null);
+      setExcuseReason('');
+      // Refresh excuses
+      const excuseRes = await fetch(`${API_URL}/meeting/excuse/list`, { headers: { Authorization: `Bearer ${token}` } });
+      if (excuseRes.ok) {
+        const d = await excuseRes.json();
+        const myExcuses = (d.excuses || []).filter((e: any) => e.vtu === userData?.vtuNumber && e.status === 'pending');
+        setPendingExcuses(myExcuses);
+      }
+    } catch (err: any) {
+      alert(err.message || 'Could not submit excuse');
+    } finally {
+      setIsSubmittingExcuse(false);
+    }
+  };
 
 
   // ==========================================
@@ -334,6 +416,36 @@ export default function HomePage() {
         </div>
       )}
 
+      {/* Excuse Submission Modal */}
+      {showExcuseModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-md z-[100] flex items-center justify-center p-6" onClick={() => setShowExcuseModal(null)}>
+          <div className="bg-white rounded-3xl w-full max-w-md overflow-hidden shadow-2xl border-2 border-amber-500" onClick={e => e.stopPropagation()}>
+            <div className="bg-amber-500 p-6 text-white flex justify-between items-center">
+              <h2 className="text-xl font-black uppercase">Submit Excuse</h2>
+              <button onClick={() => setShowExcuseModal(null)} className="text-white font-black text-2xl">&times;</button>
+            </div>
+            <div className="p-6 space-y-4">
+              <p className="text-sm text-gray-600">Session: <strong>{showExcuseModal.sessionId}</strong></p>
+              <p className="text-xs text-gray-500">Your current GPS location will be captured for verification.</p>
+              <textarea 
+                value={excuseReason} 
+                onChange={(e) => setExcuseReason(e.target.value)} 
+                placeholder="Explain why you missed this session..." 
+                className="w-full p-4 border-2 border-gray-200 rounded-2xl text-sm focus:border-amber-500 outline-none resize-none" 
+                rows={4} 
+              />
+              <button 
+                onClick={() => handleSubmitExcuse(showExcuseModal.sessionId)} 
+                disabled={isSubmittingExcuse || !excuseReason.trim()} 
+                className="w-full py-4 bg-amber-500 text-white font-black rounded-2xl uppercase text-sm disabled:opacity-50"
+              >
+                {isSubmittingExcuse ? 'Submitting...' : 'Submit Excuse with GPS'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <nav className="p-6 bg-white border-b-2 border-[#FF5722]/10 sticky top-0 z-50">
         <div className="max-w-6xl mx-auto flex justify-between items-center">
            <div className="flex items-center gap-3">
@@ -345,7 +457,17 @@ export default function HomePage() {
               
               <div className="hidden md:flex gap-6 items-center">
                 {['home', 'history', 'rankings'].map((t) => (
-                  <button key={t} onClick={() => setActiveView(t as any)} className={`text-[10px] font-black uppercase tracking-widest ${activeView === t ? 'text-[#FF5722]' : 'text-gray-400'}`}>{t}</button>
+                  <button 
+                    key={t} 
+                    onClick={() => { 
+                      setActiveView(t as any); 
+                      // If they click history or rankings, FORCE a database sync
+                      if (t !== 'home' && auth.currentUser) fetchUserStatus(auth.currentUser, false); 
+                    }} 
+                    className={`text-[10px] font-black uppercase tracking-widest ${activeView === t ? 'text-[#FF5722]' : 'text-gray-400'}`}
+                  >
+                    {t}
+                  </button>
                 ))}
                 <button onClick={() => signOut(auth)} className="text-[10px] font-black uppercase tracking-widest text-red-500 hover:bg-red-50 px-3 py-1 rounded transition-colors">Logout</button>
               </div>
@@ -360,7 +482,18 @@ export default function HomePage() {
         {isMenuOpen && (
           <div className="absolute top-full left-0 w-full bg-white border-b-2 border-[#FF5722] p-6 space-y-6 md:hidden animate-in slide-in-from-top-4">
              {['home', 'history', 'rankings'].map((t) => (
-                <button key={t} onClick={() => { setActiveView(t as any); setIsMenuOpen(false); }} className="block w-full text-left font-black uppercase italic text-2xl text-gray-900">{t}</button>
+                <button 
+                  key={t} 
+                  onClick={() => { 
+                    setActiveView(t as any); 
+                    setIsMenuOpen(false); 
+                    // If they click history or rankings, FORCE a database sync
+                    if (t !== 'home' && auth.currentUser) fetchUserStatus(auth.currentUser, false);
+                  }} 
+                  className="block w-full text-left font-black uppercase italic text-2xl text-gray-900"
+                >
+                  {t}
+                </button>
              ))}
              <button onClick={() => signOut(auth)} className="w-full py-4 bg-red-50 text-red-500 font-black rounded-2xl uppercase text-xs">Logout</button>
              <Link href="/emergency" className="flex items-center gap-3 w-full py-4 px-4 bg-red-50 text-red-600 font-black rounded-2xl uppercase text-xs tracking-widest border border-red-200 mt-2 hover:bg-red-100 transition-colors">
@@ -465,6 +598,36 @@ export default function HomePage() {
                      ))}
                   </div>
                </div>
+
+               {/* --- UPCOMING EVENTS BOARD --- */}
+               <div className="bg-white rounded-[3rem] p-8 shadow-xl border-t-4 border-orange-200 mt-8">
+                 <h3 className="font-black text-sm text-gray-400 uppercase tracking-widest mb-6 flex items-center gap-2">
+                   <span className="text-xl">🗓️</span> Upcoming Trips
+                 </h3>
+                 
+                 {upcomingEvents.length === 0 ? (
+                   <div className="bg-gray-50 border-2 border-dashed border-gray-200 rounded-3xl p-8 text-center">
+                     <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">No events scheduled for your year</p>
+                   </div>
+                 ) : (
+                   <div className="space-y-4">
+                     {upcomingEvents.map(ev => (
+                       <div key={ev.id} className="p-5 border-2 border-orange-100 bg-[#FFF9F5] rounded-3xl hover:border-[#FF5722] transition-colors group cursor-default">
+                         <h4 className="font-black text-lg text-gray-900 uppercase tracking-tight group-hover:text-[#FF5722] transition-colors">{ev.title}</h4>
+                         <div className="flex flex-wrap gap-3 mt-3">
+                           <span className="bg-white px-3 py-1.5 rounded-xl text-[10px] font-black text-orange-600 uppercase tracking-widest shadow-sm">
+                             🕒 {ev.date} @ {ev.time}
+                           </span>
+                           <span className="bg-white px-3 py-1.5 rounded-xl text-[10px] font-black text-gray-500 uppercase tracking-widest shadow-sm">
+                             📍 {ev.venue}
+                           </span>
+                         </div>
+                       </div>
+                     ))}
+                   </div>
+                 )}
+               </div>
+               {/* --- END UPCOMING EVENTS BOARD --- */}
             </div>
           </div>
         )}
@@ -475,6 +638,35 @@ export default function HomePage() {
                 <h2 className="text-4xl font-black uppercase italic tracking-tighter">My contibution</h2>
                 <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">{history.length} Entries</p>
              </div>
+
+             {/* Pending Excuses Banner */}
+             {pendingExcuses.length > 0 && (
+               <div className="bg-amber-50 border-2 border-amber-200 rounded-3xl p-6 space-y-3">
+                 <h3 className="font-black uppercase text-amber-700 text-sm">Pending Excuses ({pendingExcuses.length})</h3>
+                 {pendingExcuses.map((ex, i) => (
+                   <div key={i} className="flex justify-between items-center bg-white rounded-2xl p-4 border border-amber-100">
+                     <div>
+                       <p className="font-bold text-sm">{ex.sessionId}</p>
+                       <p className="text-xs text-gray-500 truncate max-w-[200px]">{ex.reason}</p>
+                     </div>
+                     <span className="text-[9px] font-black bg-amber-100 text-amber-700 px-3 py-1 rounded-full uppercase">Awaiting Review</span>
+                   </div>
+                 ))}
+               </div>
+             )}
+
+             {/* Strike Alert - Show if user has strikes */}
+             {(userData?.strikes || 0) > 0 && (
+               <div className="bg-red-50 border-2 border-red-200 rounded-3xl p-6">
+                 <div className="flex justify-between items-center">
+                   <div>
+                     <h3 className="font-black uppercase text-red-700 text-sm">Strike Warning</h3>
+                     <p className="text-xs text-red-600 mt-1">You have {userData?.strikes}/3 strikes. At 3 strikes you will be auto-demoted.</p>
+                   </div>
+                   <span className="text-3xl font-black text-red-500">{userData?.strikes}/3</span>
+                 </div>
+               </div>
+             )}
              <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {history.map((h, i) => (
                   <div key={i} onClick={() => setSelectedHistoryItem(h)} className="p-8 bg-white border border-gray-100 rounded-[2.5rem] shadow-sm hover:border-[#FF5722] hover:shadow-lg transition-all cursor-pointer group">

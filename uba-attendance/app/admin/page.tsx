@@ -37,6 +37,7 @@ export default function AdminPage() {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const sosFileInputRef = useRef<HTMLInputElement>(null);
+  const scheduleFileRef = useRef<HTMLInputElement>(null);
   
   const [data, setData] = useState<any>({ meetings: [], attendance: [], users: [], suspiciousLogs: [], stats: {} });
   const [coordinators, setCoordinators] = useState<string[]>([]);
@@ -61,6 +62,15 @@ export default function AdminPage() {
   const [selectedPurgeYear, setSelectedPurgeYear] = useState('1');
   const [isProcessing, setIsProcessing] = useState(false);
   const [isRestoringBackup, setIsRestoringBackup] = useState(false);
+
+  // Event Scheduling States
+  const [scheduleForm, setScheduleForm] = useState({ title: '', date: '', time: '', venue: '', targetAudience: [] as string[] });
+  const [scheduleManifest, setScheduleManifest] = useState<any[]>([]);
+
+  // CRM States
+  const [crmTab, setCrmTab] = useState<'members' | 'guests'>('members');
+  const [crmFilters, setCrmFilters] = useState({ gender: 'All', year: 'All', minEvents: 1 });
+  const [newMemberForm, setNewMemberForm] = useState({ vtu: '', name: '', dept: '', year: '', gender: 'Male', phone: '' });
 
   const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://uba-veltech-attendance-backend-system.onrender.com";
 
@@ -103,10 +113,12 @@ export default function AdminPage() {
       const sosMeetings = (emergencyData.meetings || []).map((m: any) => ({ ...m, isSOS: true, status: 'closed' }));
       const sosAttendance = emergencyData.attendance || [];
 
-      const meetingsList = [...(reportData.meetings || []), ...sosMeetings];
+      const meetingsList = [...(reportData.meetings || []), ...sosMeetings]
+        .filter((m: any) => !m.isDeleted); // TOMBSTONE FILTER
       meetingsList.sort((a: any, b: any) => getSafeTime(b.createdAt || b.endedAt || b.syncedAt) - getSafeTime(a.createdAt || a.endedAt || a.syncedAt));
 
-      const mergedAttendance = [...(reportData.attendance || []), ...sosAttendance];
+      const mergedAttendance = [...(reportData.attendance || []), ...sosAttendance]
+        .filter((a: any) => !a.isDeleted); // TOMBSTONE FILTER
 
       const processedReportData = { ...reportData, meetings: meetingsList, attendance: mergedAttendance, suspiciousLogs: reportData.suspiciousLogs || [] };
 
@@ -147,6 +159,30 @@ export default function AdminPage() {
 
   const hasActiveMeeting = useMemo(() => (data.meetings || []).some((m: any) => m.status === 'active'), [data.meetings]);
 
+  // Derived CRM Data
+  const crmUsers = useMemo(() => {
+    const attendanceMap = (data.attendance || []).reduce((acc: any, scan: any) => {
+      acc[scan.vtuNumber] = (acc[scan.vtuNumber] || 0) + 1;
+      return acc;
+    }, {});
+
+    return (data.users || []).map((u: any) => ({
+      ...u,
+      eventsAttended: attendanceMap[u.vtuNumber] || 0
+    })).filter((u: any) => {
+      // 1. Tab Filter
+      if (crmTab === 'members' && u.isGuest) return false;
+      if (crmTab === 'guests' && !u.isGuest) return false;
+      // 2. Gender Filter
+      if (crmFilters.gender !== 'All' && u.gender !== crmFilters.gender) return false;
+      // 3. Year Filter
+      if (crmFilters.year !== 'All' && String(u.year) !== crmFilters.year) return false;
+      // 4. Events Filter (Ghost vs Active)
+      if (u.eventsAttended < crmFilters.minEvents) return false;
+      return true;
+    }).sort((a: any, b: any) => b.eventsAttended - a.eventsAttended);
+  }, [data.users, data.attendance, crmTab, crmFilters]);
+
   const showToast = (msg: string) => { setToastMsg(msg); setTimeout(() => setToastMsg(null), 3000); };
 
   const handleAddCoordinator = async () => {
@@ -184,15 +220,37 @@ export default function AdminPage() {
     } catch (e) { showToast("Network error."); }
   };
 
-  const handleDeleteMeeting = async (meetingId: string) => {
-    if (!confirm("Permanently delete this meeting and all its logs?")) return;
+  // Modified function to handle the isSOS flag seamlessly
+  const handleDeleteMeeting = async (meetingId: string, isSOS: boolean = false) => {
+    if (!confirm(`Permanently delete this ${isSOS ? 'EMERGENCY ' : ''}meeting and all its logs?`)) return;
     const token = await auth.currentUser?.getIdToken();
     try {
       const res = await fetch(`${API_URL}/admin/delete-meeting`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ meetingId })
+        method: 'POST', 
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, 
+        body: JSON.stringify({ meetingId, isEmergency: isSOS })
       });
-      if (res.ok) { fetchData(true); showToast("Session purged"); }
+      if (res.ok) { fetchData(true); showToast("Session archived"); }
+      else { showToast("Failed to archive session"); }
     } catch (e) { showToast("Network error during delete"); }
+  };
+
+  // GARBAGE COLLECTOR: Permanently destroy all tombstoned data
+  const handleEmptyTrash = async () => {
+    if (!confirm("WARNING: This permanently destroys all archived sessions and attendance records. Cannot be undone. Continue?")) return;
+    setIsProcessing(true);
+    const token = await auth.currentUser?.getIdToken();
+    try {
+      const res = await fetch(`${API_URL}/admin/empty-trash`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) {
+         const data = await res.json();
+         showToast(data.message);
+         fetchData(true);
+      } else { showToast("Failed to empty trash"); }
+    } catch (e) { showToast("Network error"); }
+    setIsProcessing(false);
   };
 
   // SOS BACKUP FILE RESTORE — reads .txt backup and pushes to emergency-sync
@@ -310,6 +368,80 @@ export default function AdminPage() {
     } finally { setIsPurging(false); fetchData(true); }
   };
 
+  // --- EVENT SCHEDULING FUNCTIONS ---
+  const handleScheduleCSV = (e: any) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      const text = evt.target?.result as string;
+      const lines = text.split('\n').filter(line => line.trim().length > 0);
+      if (lines.length < 2) return showToast("CSV is empty");
+
+      // Bulletproof regex to split by comma ONLY if it's not inside quotes
+      const headers = lines[0].split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/).map(h => h.trim().replace(/"/g, '').toUpperCase());
+      const vtuIdx = headers.findIndex(h => h.includes('VTU'));
+      const nameIdx = headers.findIndex(h => h.includes('NAME'));
+
+      if (vtuIdx === -1) return showToast("CSV missing VTU column");
+
+      const parsedStudents: any[] = [];
+      for (let i = 1; i < lines.length; i++) {
+        const cols = lines[i].split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
+        if (cols.length > vtuIdx) {
+          const vtu = cols[vtuIdx]?.replace(/"/g, '').trim().toUpperCase().replace(/\D/g, '');
+          const name = nameIdx !== -1 ? cols[nameIdx]?.replace(/"/g, '').trim() : `Unknown`;
+          if (vtu) parsedStudents.push({ vtu, name });
+        }
+      }
+      setScheduleManifest(parsedStudents);
+      showToast(`Loaded ${parsedStudents.length} expected students`);
+    };
+    reader.readAsText(file);
+  };
+
+  const submitSchedule = async () => {
+    if (!scheduleForm.title || !scheduleForm.date) return showToast("Title and Date are required!");
+    setIsProcessing(true);
+    const token = await auth.currentUser?.getIdToken();
+    const res = await fetch(`${API_URL}/meeting/schedule`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ ...scheduleForm, manifest: scheduleManifest })
+    });
+    if (res.ok) {
+      showToast("Event Scheduled Successfully!");
+      setScheduleForm({ title: '', date: '', time: '', venue: '', targetAudience: [] });
+      setScheduleManifest([]);
+      if (scheduleFileRef.current) scheduleFileRef.current.value = '';
+      fetchData(true);
+    } else {
+      showToast("Failed to schedule event.");
+    }
+    setIsProcessing(false);
+  };
+
+  const toggleAudience = (year: string) => {
+    setScheduleForm(prev => ({
+      ...prev,
+      targetAudience: prev.targetAudience.includes(year) 
+        ? prev.targetAudience.filter(y => y !== year) 
+        : [...prev.targetAudience, year]
+    }));
+  };
+
+  // CRM API Calls
+  const executeCrmAction = async (endpoint: string, payload: any, successMsg: string) => {
+    setIsProcessing(true);
+    const token = await auth.currentUser?.getIdToken();
+    const res = await fetch(`${API_URL}${endpoint}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(payload)
+    });
+    if (res.ok) { showToast(successMsg); fetchData(true); } 
+    else { showToast("Action failed"); }
+    setIsProcessing(false);
+  };
+
   const downloadMeetingCSV = (meetingId: string, meetingTitle: string) => {
     const meeting = (data.meetings || []).find((m: any) => m.id === meetingId);
     if (!meeting) return showToast("Meeting not found.");
@@ -421,6 +553,77 @@ export default function AdminPage() {
     link.href = URL.createObjectURL(blob);
     link.download = `${meetingTitle.replace(/\s+/g, '_')}_Consolidated_Report.csv`;
     link.click();
+  };
+
+  // --- FEATURE 7: GLOBAL SEMESTER EXPORT ---
+  const handleGlobalExport = () => {
+    if (!data.users || data.users.length === 0) return showToast("No users available for export.");
+
+    let csv = "S.NO,Student Name,VTU,Department,Year,Club Status,Total Events Attended,Expected Verifiable Trips,Overall %,Strikes\n";
+
+    // 1. Map: How many distinct events did each VTU actually attend?
+    const userAttendanceMap: Record<string, Set<string>> = {};
+    (data.attendance || []).forEach((a: any) => {
+       if (!userAttendanceMap[a.vtuNumber]) userAttendanceMap[a.vtuNumber] = new Set();
+       userAttendanceMap[a.vtuNumber].add(a.meetingId);
+    });
+
+    // 2. Map: How many verifiable events was each VTU *scheduled* to attend?
+    const expectedTripsMap: Record<string, number> = {};
+    (data.meetings || []).forEach((m: any) => {
+       if (m.type === 'verifiable' && m.manifest) {
+          m.manifest.forEach((man: any) => {
+             const cleanVtu = String(man.vtu).replace(/\D/g, '');
+             if (!expectedTripsMap[cleanVtu]) expectedTripsMap[cleanVtu] = 0;
+             expectedTripsMap[cleanVtu]++;
+          });
+       }
+    });
+
+    // 3. Combine Data
+    const exportData = data.users.map((u: any) => {
+      const vtu = String(u.vtuNumber);
+      const attended = userAttendanceMap[vtu] ? userAttendanceMap[vtu].size : 0;
+      const expected = expectedTripsMap[vtu] || 0;
+      
+      // If they weren't in any verifiable manifests, base percentage solely on attended standard events (if any)
+      const percentage = expected === 0 ? (attended > 0 ? 100 : 0) : Math.round((attended / expected) * 100);
+
+      return {
+         name: u.name || 'Unknown',
+         vtu: vtu,
+         dept: u.dept || 'N/A',
+         year: u.year || 'N/A',
+         status: u.isGuest ? 'Guest' : 'Member',
+         attended,
+         expected,
+         percentage,
+         strikes: u.strikes || 0
+      };
+    });
+
+    // 4. Sort: Members first, then by Year, then by VTU
+    exportData.sort((a: any, b: any) => {
+       if (a.status !== b.status) return a.status === 'Member' ? -1 : 1;
+       if (a.year !== b.year) return String(a.year).localeCompare(String(b.year));
+       return a.vtu.localeCompare(b.vtu);
+    });
+
+    // 5. Generate Rows
+    exportData.forEach((row: any, index: number) => {
+       csv += `${index + 1},"${row.name}",${row.vtu},${row.dept},${row.year},${row.status},${row.attended},${row.expected},${row.percentage}%,${row.strikes}\n`;
+    });
+
+    // 6. Download
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
+    link.setAttribute("download", `UBA_Semester_Report_${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   const getMeetingStats = (attendeesList: any[]) => {
@@ -549,6 +752,7 @@ export default function AdminPage() {
             </div>
             
             <div className="hidden md:flex items-center gap-4">
+              <button onClick={handleEmptyTrash} disabled={isProcessing} className="text-xs font-black px-4 py-2 rounded-xl border-2 border-red-100 text-red-500 hover:bg-red-50 hover:border-red-200 transition uppercase tracking-widest disabled:opacity-50">Empty Trash</button>
               <button onClick={() => fetchData(true)} className="text-xs font-black px-4 py-2 rounded-xl border-2 border-gray-100 hover:bg-gray-50 transition uppercase tracking-widest text-gray-600">Refresh Data</button>
               <button onClick={() => signOut(auth)} className="text-xs font-black px-4 py-2 rounded-xl bg-gray-900 text-white hover:bg-black transition tracking-widest uppercase">Logout</button>
             </div>
@@ -579,7 +783,7 @@ export default function AdminPage() {
           <div className="lg:col-span-12 grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
             <div className="p-6 rounded-3xl shadow-sm text-center border-b-4 border-[#FF5722] bg-white"><p className="text-[10px] font-black uppercase text-gray-400 mb-1 tracking-widest">Total Trips</p><p className="text-4xl font-black text-gray-900">{filteredMeetings.length}</p></div>
             <div className="p-6 rounded-3xl shadow-sm text-center border-b-4 border-[#FF5722] bg-white"><p className="text-[10px] font-black uppercase text-gray-400 mb-1 tracking-widest">Total Scans</p><p className="text-4xl font-black text-gray-900">{(data.attendance || []).length}</p><p className="text-[8px] font-bold text-red-500 mt-1">{(data.attendance || []).filter((a:any) => a.isEmergency).length > 0 ? `incl. ${(data.attendance || []).filter((a:any) => a.isEmergency).length} SOS` : ''}</p></div>
-            <div className="p-6 rounded-3xl shadow-sm text-center border-b-4 border-gray-900 bg-white"><p className="text-[10px] font-black uppercase text-gray-400 mb-1 tracking-widest">Members</p><p className="text-4xl font-black text-gray-900">{(data.users || []).length}</p></div>
+            <div className="p-6 rounded-3xl shadow-sm text-center border-b-4 border-gray-900 bg-white"><p className="text-[10px] font-black uppercase text-gray-400 mb-1 tracking-widest">Members</p><p className="text-4xl font-black text-gray-900">{data.totalUsersCount !== undefined ? data.totalUsersCount : (data.users || []).length}</p></div>
             <div className="p-6 rounded-3xl shadow-sm text-center border-b-4 border-red-500 bg-red-50"><p className="text-[10px] font-black uppercase text-red-400 mb-1 tracking-widest italic">Security Flags</p><p className="text-4xl font-black text-red-600 animate-pulse">{(data.suspiciousLogs || []).length}</p></div>
           </div>
 
@@ -623,7 +827,7 @@ export default function AdminPage() {
                      <div className="flex flex-wrap gap-2 w-full lg:w-auto">
                        <button onClick={() => setAnalyticsViewMap({...analyticsViewMap, [m.id]: !isAnalytics})} className={`flex-1 lg:flex-none px-4 py-3 rounded-xl text-[9px] font-black border transition uppercase shadow-sm tracking-widest ${isAnalytics ? 'bg-gray-900 text-white' : 'text-[#FF5722] border-[#FF5722] bg-[#FFF9F5]'}`}>{isAnalytics ? 'Close Analytics' : 'Analytics'}</button>
                        <button onClick={() => downloadMeetingCSV(m.id, m.title)} className="flex-1 lg:flex-none px-4 py-3 rounded-xl text-[9px] font-black border border-gray-200 hover:bg-gray-50 shadow-sm uppercase tracking-widest">Export</button>
-                       <button onClick={() => handleDeleteMeeting(m.id)} className="px-4 py-3 rounded-xl text-[9px] bg-red-50 font-black text-red-500 hover:bg-red-500 hover:text-white transition shadow-sm uppercase tracking-widest">Purge</button>
+                       <button onClick={() => handleDeleteMeeting(m.id, m.isSOS)} className="px-4 py-3 rounded-xl text-[9px] bg-red-50 font-black text-red-500 hover:bg-red-500 hover:text-white transition shadow-sm uppercase tracking-widest">Archive</button>
                      </div>
                   </div>
 
@@ -801,9 +1005,70 @@ export default function AdminPage() {
               )}
             </div>
 
+            {/* 👥 CRM: CLUB MANAGEMENT */}
+            <div className="p-6 md:p-8 rounded-[2.5rem] border-2 border-blue-500 bg-white shadow-sm">
+              <h2 className="font-black mb-6 uppercase text-[10px] tracking-[0.2em] text-blue-600 flex items-center gap-2"><span className="text-lg">👥</span> Manage Club Members</h2>
+              
+              {/* Tabs */}
+              <div className="flex gap-2 mb-6 bg-gray-50 p-1 rounded-xl">
+                <button onClick={() => setCrmTab('members')} className={`flex-1 py-3 rounded-lg font-black text-xs uppercase tracking-widest transition ${crmTab === 'members' ? 'bg-blue-600 text-white shadow-md' : 'text-gray-500'}`}>Club Members</button>
+                <button onClick={() => setCrmTab('guests')} className={`flex-1 py-3 rounded-lg font-black text-xs uppercase tracking-widest transition ${crmTab === 'guests' ? 'bg-purple-600 text-white shadow-md' : 'text-gray-500'}`}>Guests / Temp</button>
+              </div>
+
+              {/* Filters */}
+              <div className="grid grid-cols-3 gap-3 mb-6">
+                <select value={crmFilters.year} onChange={e => setCrmFilters({...crmFilters, year: e.target.value})} className="p-3 bg-gray-50 border border-gray-100 rounded-xl font-bold text-xs outline-none">
+                  <option value="All">All Years</option><option value="1">Year 1</option><option value="2">Year 2</option><option value="3">Year 3</option><option value="4">Year 4</option>
+                </select>
+                <select value={crmFilters.gender} onChange={e => setCrmFilters({...crmFilters, gender: e.target.value})} className="p-3 bg-gray-50 border border-gray-100 rounded-xl font-bold text-xs outline-none">
+                  <option value="All">All Genders</option><option value="Male">Male</option><option value="Female">Female</option>
+                </select>
+                <div className="flex items-center bg-gray-50 border border-gray-100 rounded-xl px-3">
+                  <span className="text-[9px] font-black text-gray-400 uppercase tracking-widest mr-2">Min Events:</span>
+                  <input type="number" min="0" value={crmFilters.minEvents} onChange={e => setCrmFilters({...crmFilters, minEvents: parseInt(e.target.value) || 0})} className="w-full bg-transparent font-black text-blue-600 outline-none" />
+                </div>
+              </div>
+
+              {/* Results */}
+              <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
+                {crmUsers.map((u: any) => (
+                  <div key={u.vtuNumber} className="flex justify-between items-center p-4 border border-gray-100 rounded-2xl hover:border-blue-300 transition group">
+                    <div>
+                      <p className="font-black text-sm text-gray-900 capitalize">{u.name || 'Unknown'}</p>
+                      <p className="text-[10px] font-bold text-gray-500 mt-1">{u.vtuNumber} • Yr {u.year} • {u.dept}</p>
+                    </div>
+                    <div className="flex items-center gap-4">
+                      <div className="flex gap-2">
+                        <div className="text-center bg-blue-50 px-3 py-1 rounded-xl border border-blue-100">
+                          <span className="block text-[8px] font-black uppercase text-blue-400 tracking-widest">Events</span>
+                          <span className="font-black text-blue-600">{u.eventsAttended}</span>
+                        </div>
+                        {crmTab === 'members' && (
+                          <div className={`text-center px-3 py-1 rounded-xl border ${u.strikes >= 2 ? 'bg-red-50 border-red-200' : 'bg-orange-50 border-orange-100'}`}>
+                            <span className={`block text-[8px] font-black uppercase tracking-widest ${u.strikes >= 2 ? 'text-red-500' : 'text-orange-400'}`}>Strikes</span>
+                            <span className={`font-black ${u.strikes >= 2 ? 'text-red-600' : 'text-orange-500'}`}>{u.strikes || 0}/3</span>
+                          </div>
+                        )}
+                      </div>
+                      {crmTab === 'members' ? (
+                        <button onClick={() => executeCrmAction('/admin/crm/demote', { vtu: u.vtuNumber }, "Demoted to Guest")} disabled={isProcessing} className="px-3 py-2 bg-red-50 text-red-600 text-[9px] font-black uppercase tracking-widest rounded-lg opacity-0 group-hover:opacity-100 transition hover:bg-red-500 hover:text-white">Demote</button>
+                      ) : (
+                        <button onClick={() => executeCrmAction('/admin/crm/promote', { vtu: u.vtuNumber }, "Promoted to Member")} disabled={isProcessing} className="px-3 py-2 bg-green-50 text-green-600 text-[9px] font-black uppercase tracking-widest rounded-lg opacity-0 group-hover:opacity-100 transition hover:bg-green-500 hover:text-white">Promote</button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+                {crmUsers.length === 0 && <p className="text-center text-xs font-black text-gray-400 uppercase py-10">No users match criteria</p>}
+              </div>
+            </div>
+
             {/* ROSTER MANAGEMENT */}
             <div className="p-6 md:p-8 rounded-[2.5rem] border-2 border-gray-100 bg-white shadow-sm hover:border-gray-200 transition-colors">
               <h2 className="font-black mb-6 uppercase text-[10px] tracking-[0.2em] text-gray-400 flex items-center gap-2"><span className="text-lg">🗄️</span> Roster Management</h2>
+              
+              <button onClick={handleGlobalExport} className="w-full mb-6 bg-gradient-to-r from-green-500 to-green-600 text-white font-black py-4 rounded-2xl uppercase tracking-widest text-[10px] shadow-lg hover:shadow-xl hover:scale-[1.02] transition-all flex items-center justify-center gap-3">
+                <span className="text-lg">📊</span> Generate Dean's Report (CSV)
+              </button>
               
               <div className="relative w-full border-2 border-dashed border-blue-200 bg-blue-50 rounded-2xl p-6 text-center hover:bg-blue-100 hover:border-blue-300 transition-colors cursor-pointer mb-6 group">
                  <p className="text-[10px] font-black text-blue-600 uppercase tracking-widest group-hover:scale-105 transition-transform">{isUploading ? "Processing CSV..." : "+ Upload Master CSV"}</p>
@@ -826,6 +1091,37 @@ export default function AdminPage() {
                   <input type="file" ref={sosFileInputRef} onChange={handleSOSFileUpload} accept=".txt" className="absolute inset-0 opacity-0 cursor-pointer" />
                 </div>
               </div>
+            </div>
+
+            {/* 🗓️ EVENT SCHEDULING UI */}
+            <div className="p-6 md:p-8 rounded-[2.5rem] border-2 border-orange-500 bg-[#FFF9F5] shadow-sm">
+              <h2 className="font-black mb-6 uppercase text-[10px] tracking-[0.2em] text-orange-500 flex items-center gap-2"><span className="text-lg">🗓️</span> Schedule Future Event</h2>
+              
+              <input type="text" placeholder="Event Title (e.g. Village Drive)" value={scheduleForm.title} onChange={e => setScheduleForm({...scheduleForm, title: e.target.value})} className="w-full p-4 rounded-xl mb-3 outline-none font-bold text-sm bg-white shadow-sm border border-orange-100" />
+              
+              <div className="flex gap-3 mb-3">
+                <input type="date" value={scheduleForm.date} onChange={e => setScheduleForm({...scheduleForm, date: e.target.value})} className="flex-1 p-4 rounded-xl outline-none font-bold text-sm bg-white shadow-sm border border-orange-100 text-gray-600" />
+                <input type="time" value={scheduleForm.time} onChange={e => setScheduleForm({...scheduleForm, time: e.target.value})} className="flex-1 p-4 rounded-xl outline-none font-bold text-sm bg-white shadow-sm border border-orange-100 text-gray-600" />
+              </div>
+
+              <input type="text" placeholder="Venue (Optional)" value={scheduleForm.venue} onChange={e => setScheduleForm({...scheduleForm, venue: e.target.value})} className="w-full p-4 rounded-xl mb-4 outline-none font-bold text-sm bg-white shadow-sm border border-orange-100" />
+
+              <p className="text-[9px] font-black uppercase tracking-widest text-gray-400 mb-2">Target Audience (Leave blank for all)</p>
+              <div className="flex gap-2 mb-4">
+                {['1', '2', '3', '4'].map(yr => (
+                  <button key={yr} onClick={() => toggleAudience(yr)} className={`flex-1 py-2 rounded-lg font-black text-xs transition ${scheduleForm.targetAudience.includes(yr) ? 'bg-orange-500 text-white' : 'bg-white border border-orange-200 text-orange-400'}`}>Yr {yr}</button>
+                ))}
+              </div>
+
+              <p className="text-[9px] font-black uppercase tracking-widest text-gray-400 mb-2">Base Roster CSV (Optional)</p>
+              <div className="relative w-full border-2 border-dashed border-orange-200 bg-white rounded-xl p-4 text-center mb-6 hover:bg-orange-50 transition cursor-pointer">
+                <p className="text-[10px] font-bold text-orange-500">{scheduleManifest.length > 0 ? `${scheduleManifest.length} Students Loaded` : '+ Upload CSV'}</p>
+                <input type="file" ref={scheduleFileRef} onChange={handleScheduleCSV} accept=".csv" className="absolute inset-0 opacity-0 cursor-pointer" />
+              </div>
+
+              <button onClick={submitSchedule} disabled={isProcessing} className="w-full bg-gray-900 text-white font-black py-4 rounded-2xl uppercase tracking-widest text-[10px] shadow-lg hover:bg-black transition disabled:opacity-50">
+                {isProcessing ? 'Scheduling...' : 'Schedule Event'}
+              </button>
             </div>
 
           </div>

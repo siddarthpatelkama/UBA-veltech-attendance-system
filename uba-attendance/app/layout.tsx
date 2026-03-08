@@ -3,11 +3,14 @@
 import { useEffect } from "react";
 import "./globals.css";
 
-// Metadata Configuration
+// Metadata Configuration (ADDED SEO FIELDS HERE)
 const metadataValues = {
   title: "UBA Attendance | Vel Tech",
-  description: "Unnat Bharat Abhiyan Attendance Portal",
+  description: "Unnat Bharat Abhiyan Attendance Portal & Field Operations CRM.",
   manifest: "/manifest.json",
+  keywords: "UBA Veltech, Vel Tech UBA, Unnat Bharat Abhiyan, Vel Tech University, Attendance Tracker, Field Operations",
+  url: "https://uba-veltech-attendance-system.vercel.app",
+  image: "/uba-logo.png"
 };
 
 export default function RootLayout({
@@ -46,6 +49,18 @@ export default function RootLayout({
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="default" />
         <meta name="apple-mobile-web-app-title" content="UBA Portal" />
+
+        {/* --- FEATURE 12: NEW SEO & OPENGRAPH TAGS INJECTED HERE --- */}
+        <meta name="keywords" content={metadataValues.keywords} />
+        <meta name="author" content="VTU28319" />
+        <meta property="og:title" content={metadataValues.title} />
+        <meta property="og:description" content={metadataValues.description} />
+        <meta property="og:image" content={metadataValues.image} />
+        <meta property="og:url" content={metadataValues.url} />
+        <meta property="og:type" content="website" />
+        <meta property="og:site_name" content="UBA Vel Tech" />
+        {/* ---------------------------------------------------------- */}
+
       </head>
       <body className="antialiased bg-white text-gray-900 min-h-screen flex flex-col">
         

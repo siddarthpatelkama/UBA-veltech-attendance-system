@@ -2,11 +2,14 @@
 
 import { useEffect, useState, useRef, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
+import dynamic from 'next/dynamic';
 import ProtectedRoute from '../components/ProtectedRoute';
 import { auth } from '@/lib/firebase';
 import { signOut } from 'firebase/auth';
 import QRCode from 'react-qr-code';
 import CryptoJS from 'crypto-js';
+
+const LeafletMap = dynamic(() => import('../components/MapBox'), { ssr: false });
 
 const getSafeTime = (val: any, fallback: number = 0) => {
   if (!val) return fallback;
@@ -31,6 +34,7 @@ export default function CoordinatorPage() {
   const [newTitle, setNewTitle] = useState('');
   const [selectedMeetingId, setSelectedMeetingId] = useState<string | null>(null);
   const [manualVtu, setManualVtu] = useState('');
+  const [manualCategory, setManualCategory] = useState('UBA Member'); // FEATURE 9: Taxonomy
   const [newPhaseTitle, setNewPhaseTitle] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [filterMonth, setFilterMonth] = useState('All'); 
@@ -73,6 +77,11 @@ export default function CoordinatorPage() {
   const [secondsLeft, setSecondsLeft] = useState<number>(0);
   const [greeting, setGreeting] = useState('');
   const [statusMsg, setStatusMsg] = useState('');
+
+  // --- EXCUSE INBOX STATES ---
+  const [excuses, setExcuses] = useState<any[]>([]);
+  const [selectedExcuse, setSelectedExcuse] = useState<any>(null);
+  const [showExcuses, setShowExcuses] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const sosFileInputRef = useRef<HTMLInputElement>(null);
@@ -129,7 +138,9 @@ export default function CoordinatorPage() {
         const sosMeetings = (emergencyData.meetings || []).map((m: any) => ({ ...m, isSOS: true, status: 'closed' }));
         const sosAttendance = emergencyData.attendance || [];
 
-        const processedMeetings = [...data.meetings, ...sosMeetings].map((m: any) => {
+        const processedMeetings = [...data.meetings, ...sosMeetings]
+          .filter((m: any) => !m.isDeleted) // TOMBSTONE FILTER
+          .map((m: any) => {
           if (m.isSOS) return m; // Emergency meetings don't expire
           const createdAtTime = getSafeTime(m.createdAt, Date.now());
           const expiresAt = createdAtTime + 1800000; // 30 minutes in milliseconds
@@ -144,7 +155,13 @@ export default function CoordinatorPage() {
         processedMeetings.sort((a: any, b: any) => getSafeTime(b.createdAt || b.endedAt || b.syncedAt, 0) - getSafeTime(a.createdAt || a.endedAt || a.syncedAt, 0));
 
         setMeetings(processedMeetings);
-        setAttendance([...(data.attendance || []), ...sosAttendance]);
+        
+        // ADDED FALLBACK: Extract attendance if embedded inside the meeting objects
+        const aggregatedAttendance = Array.isArray(data.attendance) 
+          ? data.attendance 
+          : (data.meetings || []).flatMap((m: any) => m.attendance || []);
+          
+        setAttendance([...aggregatedAttendance, ...sosAttendance].filter((a: any) => !a.isDeleted)); // TOMBSTONE FILTER
         setSuspiciousLogs(data.suspiciousLogs || []);
 
         // SMART MERGE: Use cached roster if backend skipped it
@@ -155,6 +172,10 @@ export default function CoordinatorPage() {
           localStorage.setItem('uba_users_cache', JSON.stringify(data.users));
           localStorage.setItem('uba_master_roster', JSON.stringify(data.users));
         }
+
+        // Fetch pending excuses for inbox
+        const excuseRes = await fetch(`${API_URL}/meeting/excuse/list`, { headers: { Authorization: `Bearer ${token}` } });
+        if (excuseRes.ok) { const d = await excuseRes.json(); setExcuses(d.excuses || []); }
 
         if (forceSelectLatest && processedMeetings.length > 0) {
           setSelectedMeetingId(processedMeetings[0].id);
@@ -234,7 +255,8 @@ export default function CoordinatorPage() {
   useEffect(() => {
     const hour = new Date().getHours();
     const email = auth.currentUser?.email || '';
-    const vtuNumeric = email.split('@')[0].toUpperCase().replace(/\D/g, ''); 
+    // FIXED: Removed .replace(/\D/g, '') to preserve alphanumeric VTUs like CS01440051
+    const vtuNumeric = email.split('@')[0].toUpperCase(); 
     const dbUser = users.find(u => u.vtuNumber === vtuNumeric) || {};
     
     const name = myProfile?.name || dbUser.name || auth.currentUser?.displayName || vtuNumeric;
@@ -344,7 +366,7 @@ export default function CoordinatorPage() {
             // If device is already locked to a DIFFERENT VTU
             if (currentLocks[deviceId] && currentLocks[deviceId] !== vtu) {
               playErrorSound();
-              setScannerError(`\ud83d\udea8 PROXY BLOCKED: Phone locked to ${currentLocks[deviceId]}`);
+              setScannerError(`🚨 PROXY BLOCKED: Phone locked to ${currentLocks[deviceId]}`);
               setTimeout(() => setScannerError(''), 3500);
               return;
             }
@@ -384,7 +406,7 @@ export default function CoordinatorPage() {
           
           // Check for dupes USING REFS
           const isDupeOffline = localOfflineScansRef.current.some(s => s.vtuNumber === vtu && s.meetingId === meetingIdToUse && s.phaseId === phaseIdToUse);
-          const isDupeOnline = attendanceRef.current.some(a => a.vtuNumber === vtu && a.meetingId === meetingIdToUse && a.phaseId === phaseIdToUse);
+          const isDupeOnline = attendanceRef.current.some(a => (a.vtuNumber === vtu || a.vtu === vtu) && a.meetingId === meetingIdToUse && a.phaseId === phaseIdToUse);
           
           if (isDupeOffline || isDupeOnline) {
             playErrorSound(); setScannerError(`ALREADY SCANNED: ${vtu}`); setTimeout(() => setScannerError(''), 2000); return;
@@ -427,6 +449,41 @@ export default function CoordinatorPage() {
 
   // --- HANDLERS ---
   const showToast = (msg: string) => { setToastMsg(msg); setTimeout(() => setToastMsg(null), 3000); };
+
+  // --- FEATURE 8: BULK BLAST WARNING ---
+  const handleBulkBlast = (type: 'whatsapp' | 'sms', missingList: any[], meetingTitle: string) => {
+    if (missingList.length === 0) return showToast("No missing students to warn.");
+
+    // 1. Extract phone numbers from Master Roster using VTUs in missingList
+    const masterRoster = JSON.parse(localStorage.getItem('uba_master_roster') || '[]');
+    const missingPhones = missingList.map((m: any) => {
+      const studentProfile = masterRoster.find((u: any) => String(u.vtuNumber) === String(m.vtu));
+      return studentProfile ? studentProfile.phone : null;
+    }).filter(phone => phone && phone !== 'N/A' && phone.length >= 10);
+
+    if (missingPhones.length === 0) return showToast("No valid phone numbers found for missing students.");
+
+    // 2. Format the message
+    const message = `🚨 UBA ALERT: You are currently marked MISSING for the active phase of ${meetingTitle}. Report to the coordinator immediately or a strike will be applied.`;
+    const encodedMessage = encodeURIComponent(message);
+
+    // 3. Trigger Native Protocols
+    if (type === 'sms') {
+      // SMS protocol for multiple numbers (comma separated on Android, ampersand on iOS)
+      const separator = /iPhone|iPad|iPod/i.test(navigator.userAgent) ? '&' : ',';
+      const phoneString = missingPhones.join(separator);
+      window.location.href = `sms:${phoneString}?body=${encodedMessage}`;
+    } else if (type === 'whatsapp') {
+      // Note: WhatsApp API doesn't support bulk messaging to unsaved contacts without a Business API.
+      // This fallback creates a single click-to-chat for the first missing student as a quick-action,
+      // but informs the user if there are multiple.
+      if (missingPhones.length > 1) {
+          alert(`WhatsApp does not allow bulk spamming to unsaved numbers. \n\nOpening chat for the first missing student. For the rest, please use the SMS Blast option or message them individually from their dossier.`);
+      }
+      const firstPhone = missingPhones[0].replace(/\D/g, '');
+      window.open(`https://wa.me/91${firstPhone}?text=${encodedMessage}`, '_blank');
+    }
+  };
 
   const handleCreateMeeting = async () => {
     if (!newTitle.trim()) return showToast("Enter a meeting title!");
@@ -494,7 +551,9 @@ export default function CoordinatorPage() {
     if (!manualVtu.trim()) return showToast("Enter VTU Number");
     setIsProcessing(true);
     const token = await auth.currentUser?.getIdToken();
-    const vtus = manualVtu.split(' ').filter(v => v.length > 0);
+    
+    // FIXED: Split by spaces or commas, preserve alphanumeric
+    const vtus = manualVtu.split(/[\s,]+/).filter(v => v.length > 0);
     
     const displayMeeting = meetings.find(m => m.id === selectedMeetingId);
     const activePhase = displayMeeting?.type === 'verifiable' ? (displayMeeting.phases || []).find((p:any) => p.status === 'active') : null;
@@ -503,10 +562,11 @@ export default function CoordinatorPage() {
     if (isOfflineMode) {
       const vault = JSON.parse(localStorage.getItem('uba_offline_vault') || '[]');
       const newScans = vtus.map(v => ({
-        meetingId: selectedMeetingId, action: 'add', vtu: v.toUpperCase().replace(/\D/g, ''),
-        studentName: `Manual: ${v}`, timestamp: Date.now(), isOverride: true,
+        meetingId: selectedMeetingId, action: 'add', vtu: v.toUpperCase().trim(),
+        studentName: `Manual: ${v.toUpperCase().trim()}`, timestamp: Date.now(), isOverride: true,
+        overrideCategory: manualCategory, // FEATURE 9: Taxonomy
         enteredBy: auth.currentUser?.email || 'Offline_Coord', phaseId: targetPhaseId, isEmergency: isOfflineMode,
-        vtuNumber: v.toUpperCase().replace(/\D/g, ''), dateString: new Date().toLocaleString()
+        vtuNumber: v.toUpperCase().trim(), dateString: new Date().toLocaleString()
       }));
       const updatedVault = [...vault, ...newScans];
       localStorage.setItem('uba_offline_vault', JSON.stringify(updatedVault));
@@ -514,9 +574,10 @@ export default function CoordinatorPage() {
       showToast(`${vtus.length} VTUs injected into Vault`);
     } else {
       for (const v of vtus) {
-        const vtuToUse = v.toUpperCase().replace(/\D/g, '');
-        const payload = { meetingId: selectedMeetingId, action: 'add', vtu: vtuToUse, isOverride: true, enteredBy: auth.currentUser?.email, phaseId: targetPhaseId };
-        const res = await fetch(`${API_URL}/meeting/update-manifest`, {
+        // FIXED: Kept alphanumeric
+        const vtuToUse = v.toUpperCase().trim();
+        const payload = { meetingId: selectedMeetingId, action: 'add', vtu: vtuToUse, isOverride: true, category: manualCategory, enteredBy: auth.currentUser?.email, phaseId: targetPhaseId };
+        await fetch(`${API_URL}/meeting/update-manifest`, {
           method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
           body: JSON.stringify(payload)
         });
@@ -533,7 +594,7 @@ export default function CoordinatorPage() {
     if (!savedVault) return;
     
     const vault = JSON.parse(savedVault);
-    const updatedVault = vault.filter((s: any) => !(s.vtu === vtuToRemove && s.meetingId === selectedMeetingId));
+    const updatedVault = vault.filter((s: any) => !( (s.vtu === vtuToRemove || s.vtuNumber === vtuToRemove) && s.meetingId === selectedMeetingId));
     
     localStorage.setItem('uba_offline_vault', JSON.stringify(updatedVault));
     setLocalOfflineScans(updatedVault);
@@ -702,7 +763,7 @@ export default function CoordinatorPage() {
   const completedPhases = isVerifiable ? (displayMeeting.phases || []).filter((p:any) => p.status === 'closed') : [];
   
   const phaseAttendees = activePhase ? totalDisplayAttendees.filter(a => a.phaseId === activePhase.id) : totalDisplayAttendees;
-  const verifiedVtus = phaseAttendees.map(a => a.vtuNumber);
+  const verifiedVtus = phaseAttendees.map(a => a.vtuNumber || a.vtu);
   
   const tabMissing = isVerifiable ? (manifest || []).filter((m:any) => !verifiedVtus.includes(m.vtu)) : [];
   const tabVerified = (phaseAttendees || []).filter(a => !a.isOverride);
@@ -714,6 +775,18 @@ export default function CoordinatorPage() {
       <div className="animate-spin rounded-full h-10 w-10 border-t-4 border-[#FF5722]"></div>
     </div>
   );
+
+  // --- EXCUSE RESOLUTION ---
+  const resolveExcuse = async (excuseId: string, vtu: string, action: 'accept' | 'reject') => {
+    const token = await auth.currentUser?.getIdToken();
+    await fetch(`${API_URL}/meeting/excuse/resolve`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ excuseId, vtu, action })
+    });
+    setExcuses(prev => prev.filter(e => e.id !== excuseId));
+    setSelectedExcuse(null);
+    showToast(action === 'accept' ? 'Strike wiped!' : 'Excuse rejected');
+  };
 
   const handleSafeLogout = () => {
     if (localOfflineScans.length > 0) {
@@ -907,6 +980,57 @@ export default function CoordinatorPage() {
           </div>
         </nav>
 
+        {/* 📥 EXCUSE INBOX TOGGLE */}
+        {excuses.length > 0 && (
+          <div className="max-w-xl mx-auto w-full p-4">
+            <button onClick={() => setShowExcuses(!showExcuses)} className="w-full bg-orange-100 border-2 border-orange-300 text-orange-800 py-4 rounded-2xl font-black text-xs uppercase tracking-widest flex items-center justify-between px-6 shadow-sm">
+              <span>📥 Pending Excuses ({excuses.length})</span>
+              <span>{showExcuses ? 'Close' : 'Review'}</span>
+            </button>
+          </div>
+        )}
+
+        {/* EXCUSE MODAL */}
+        {selectedExcuse && (
+          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+            <div className="bg-white p-6 rounded-[2rem] w-full max-w-md shadow-2xl animate-in zoom-in-95">
+              <h3 className="font-black text-xl text-gray-900 mb-1">Absence Excuse</h3>
+              <p className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-4">VTU: {selectedExcuse.vtu} • Event: {selectedExcuse.eventTitle}</p>
+              
+              <div className="bg-gray-50 p-4 rounded-xl mb-4 border border-gray-100">
+                <p className="text-sm font-medium text-gray-800 italic">"{selectedExcuse.reason || 'No reason provided.'}"</p>
+              </div>
+
+              <div className="h-48 w-full rounded-xl overflow-hidden mb-6 border-2 border-gray-200 z-0 relative">
+                <LeafletMap lat={selectedExcuse.lat} lng={selectedExcuse.lng} />
+              </div>
+
+              <div className="flex gap-3">
+                <button onClick={() => resolveExcuse(selectedExcuse.id, selectedExcuse.vtu, 'reject')} className="flex-1 bg-red-50 text-red-600 py-4 rounded-xl font-black uppercase text-[10px] tracking-widest border border-red-100 hover:bg-red-500 hover:text-white transition">Reject (Keep Strike)</button>
+                <button onClick={() => resolveExcuse(selectedExcuse.id, selectedExcuse.vtu, 'accept')} className="flex-1 bg-green-500 text-white py-4 rounded-xl font-black uppercase text-[10px] tracking-widest shadow-md hover:bg-green-600 transition">Accept (Wipe Strike)</button>
+              </div>
+              <button onClick={() => setSelectedExcuse(null)} className="w-full mt-3 text-[10px] font-bold text-gray-400 uppercase tracking-widest py-2">Cancel</button>
+            </div>
+          </div>
+        )}
+
+        {/* EXCUSE LIST */}
+        {showExcuses && (
+          <div className="max-w-xl mx-auto w-full px-4 mb-6 space-y-3">
+            {excuses.map(e => (
+              <div key={e.id} onClick={() => setSelectedExcuse(e)} className={`p-4 rounded-2xl border cursor-pointer hover:shadow-md transition bg-white flex justify-between items-center ${e.status === 'submitted' ? 'border-orange-300' : 'border-gray-200'}`}>
+                <div>
+                  <p className="font-black text-sm text-gray-900">{e.eventTitle}</p>
+                  <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">VTU: {e.vtu}</p>
+                </div>
+                <span className={`text-[8px] font-black uppercase tracking-widest px-3 py-1 rounded-lg ${e.status === 'submitted' ? 'bg-orange-500 text-white' : 'bg-gray-100 text-gray-500'}`}>
+                  {e.status === 'submitted' ? 'Action Required' : 'Awaiting Student'}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+
         <main className="max-w-7xl mx-auto p-4 md:p-6 mt-4 flex flex-col lg:grid lg:grid-cols-12 gap-8">
           
           {/* EMERGENCY RECOVERY BANNER */}
@@ -1072,6 +1196,13 @@ export default function CoordinatorPage() {
                       ) : (
                         <div className="flex flex-col md:flex-row gap-3">
                           <div className="flex gap-2 flex-1">
+                            {/* FEATURE 9 DROPDOWN */}
+                            <select value={manualCategory} onChange={(e) => setManualCategory(e.target.value)} className="p-3 border border-gray-100 rounded-xl outline-none font-bold text-[10px] uppercase bg-white shadow-sm text-[#FF5722] cursor-pointer">
+                              <option value="UBA Member">UBA</option>
+                              <option value="NSS">NSS</option>
+                              <option value="Guest">Guest</option>
+                              <option value="Faculty">Faculty</option>
+                            </select>
                             <input type="text" value={manualVtu} onChange={(e) => setManualVtu(e.target.value)} placeholder="VTU..." className="flex-1 p-4 border border-gray-100 rounded-2xl font-mono outline-none bg-white font-black text-sm shadow-inner" />
                             <button onClick={() => handleManualAdd('initial')} disabled={isProcessing} className="bg-white border-2 border-gray-200 text-gray-800 px-6 py-3 font-black rounded-xl uppercase text-[10px] tracking-widest hover:border-gray-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">{isProcessing ? 'Injecting...' : 'Inject'}</button>
                           </div>
@@ -1140,6 +1271,13 @@ export default function CoordinatorPage() {
                             <div className="w-full border-t border-[#FF5722]/20 pt-4">
                                <h3 className="font-black mb-3 uppercase text-[9px] tracking-widest text-gray-400 text-center">Manual Inject</h3>
                                <div className="flex gap-2">
+                                 {/* FEATURE 9 DROPDOWN */}
+                                 <select value={manualCategory} onChange={(e) => setManualCategory(e.target.value)} className="p-3 border border-gray-100 rounded-xl outline-none font-bold text-[10px] uppercase bg-white shadow-sm text-[#FF5722] cursor-pointer">
+                                   <option value="UBA Member">UBA</option>
+                                   <option value="NSS">NSS</option>
+                                   <option value="Guest">Guest</option>
+                                   <option value="Faculty">Faculty</option>
+                                 </select>
                                  <input type="text" value={manualVtu} onChange={(e)=>setManualVtu(e.target.value.toUpperCase())} placeholder="VTU..." className="flex-1 p-3 text-sm border border-gray-100 rounded-xl outline-none font-mono font-black text-center bg-white shadow-sm" onKeyDown={(e) => { if (e.key === 'Enter') handleManualAdd(); }}/>
                                  <button onClick={() => handleManualAdd()} disabled={isProcessing} className="bg-gray-200 text-gray-800 px-4 rounded-xl font-black text-[10px] uppercase hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed">{isProcessing ? 'Adding...' : 'Add'}</button>
                                </div>
@@ -1193,9 +1331,9 @@ export default function CoordinatorPage() {
                             <div className="grid md:grid-cols-2 gap-3">
                               {tabVerified.map((at, i) => (
                                  <div key={i} className="p-4 rounded-2xl border border-gray-100 bg-[#FFF9F5]/30 flex justify-between items-center shadow-sm group hover:border-red-200 transition-all">
-                                   <div onClick={() => setSelectedStudent({studentName: at.studentName, vtuNumber: at.vtuNumber})} className="cursor-pointer flex-grow">
-                                     <p className="font-bold text-sm text-gray-900">{at.studentName}</p>
-                                     <p className="text-[10px] font-mono font-bold text-[#FF5722]">{at.vtuNumber}</p>
+                                   <div onClick={() => setSelectedStudent({studentName: at.studentName, vtuNumber: at.vtuNumber || at.vtu})} className="cursor-pointer flex-grow">
+                                     <p className="font-bold text-sm text-gray-900">{at.studentName || 'Unknown'}</p>
+                                     <p className="text-[10px] font-mono font-bold text-[#FF5722]">{at.vtuNumber || at.vtu}</p>
                                    </div>
                                    <div className="flex items-center gap-2">
                                      <span className="text-[9px] font-black text-gray-400">
@@ -1207,7 +1345,7 @@ export default function CoordinatorPage() {
                                        })}
                                      </span>
                                      <button 
-                                       onClick={(e) => { e.stopPropagation(); if(confirm(`Remove ${at.vtuNumber}?`)) handleLocalRemove(at.vtuNumber); }}
+                                       onClick={(e) => { e.stopPropagation(); if(confirm(`Remove ${at.vtuNumber || at.vtu}?`)) handleLocalRemove(at.vtuNumber || at.vtu); }}
                                        className="ml-2 p-2 bg-red-50 text-red-600 rounded-xl opacity-0 group-hover:opacity-100 active:scale-90 transition-all shadow-sm border border-red-100"
                                      >
                                        ✕
@@ -1220,22 +1358,38 @@ export default function CoordinatorPage() {
                           )}
 
                           {activeTab === 'missing' && (
-                            <div className="grid md:grid-cols-2 gap-3">
-                              {tabMissing.map((m:any, i:number) => {
-                                 const masterRoster = JSON.parse(localStorage.getItem('uba_master_roster') || '[]');
-                                 const studentData = masterRoster.find((u:any) => String(u.vtuNumber) === String(m.vtu)) || m;
-                                 const phone = studentData.phone || 'N/A';
-                                 return (
-                                 <div key={i} onClick={() => setSelectedStudent({studentName: m.name, vtuNumber: m.vtu, phone})} className="p-4 rounded-2xl border border-red-100 bg-white flex justify-between items-center shadow-sm cursor-pointer hover:border-red-500 transition-colors">
-                                   <div><p className="font-bold text-sm text-gray-900">{m.name}</p><p className="text-[10px] font-mono font-bold text-gray-500">{m.vtu}</p></div>
-                                   <div className="flex items-center gap-2">
-                                     {phone !== 'N/A' && <a href={`tel:${phone}`} onClick={(e) => e.stopPropagation()} className="text-[9px] px-2 py-1 bg-green-100 text-green-700 font-black rounded uppercase tracking-widest hover:bg-green-500 hover:text-white transition-colors">📞 Call</a>}
-                                     <span className="text-[8px] px-2 py-1 bg-red-100 text-red-600 font-black rounded uppercase">Abandoned</span>
+                            <div className="flex flex-col gap-4">
+                              {/* --- BULK BLAST UI --- */}
+                              {tabMissing.length > 0 && (
+                                <div className="flex gap-2 bg-red-50 p-2 rounded-2xl border border-red-100 shadow-sm shrink-0">
+                                  <button onClick={() => handleBulkBlast('sms', tabMissing, displayMeeting?.title || 'Session')} className="flex-1 bg-red-500 text-white font-black text-[9px] uppercase tracking-widest py-3 rounded-xl shadow-md hover:bg-red-600 transition-colors flex items-center justify-center gap-2">
+                                    💬 SMS Blast
+                                  </button>
+                                  <button onClick={() => handleBulkBlast('whatsapp', tabMissing, displayMeeting?.title || 'Session')} className="flex-1 bg-[#25D366] text-white font-black text-[9px] uppercase tracking-widest py-3 rounded-xl shadow-md hover:bg-green-600 transition-colors flex items-center justify-center gap-2">
+                                    <svg className="w-3 h-3 fill-current" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.414 0 .018 5.396.015 12.03c0 2.12.553 4.189 1.606 6.06L0 24l6.117-1.605a11.77 11.77 0 005.925 1.585h.005c6.635 0 12.032-5.396 12.035-12.03a11.79 11.79 0 00-3.517-8.503z"/></svg>
+                                    WA Blast
+                                  </button>
+                                </div>
+                              )}
+                              {/* ----------------------- */}
+
+                              <div className="grid md:grid-cols-2 gap-3 overflow-y-auto pr-2 custom-scrollbar max-h-[200px]">
+                                {tabMissing.map((m:any, i:number) => {
+                                   const masterRoster = JSON.parse(localStorage.getItem('uba_master_roster') || '[]');
+                                   const studentData = masterRoster.find((u:any) => String(u.vtuNumber) === String(m.vtu)) || m;
+                                   const phone = studentData.phone || 'N/A';
+                                   return (
+                                   <div key={i} onClick={() => setSelectedStudent({studentName: m.name, vtuNumber: m.vtu, phone})} className="p-4 rounded-2xl border border-red-100 bg-white flex justify-between items-center shadow-sm cursor-pointer hover:border-red-500 transition-colors">
+                                     <div><p className="font-bold text-sm text-gray-900">{m.name || 'Unknown'}</p><p className="text-[10px] font-mono font-bold text-gray-500">{m.vtu}</p></div>
+                                     <div className="flex items-center gap-2">
+                                       {phone !== 'N/A' && <a href={`tel:${phone}`} onClick={(e) => e.stopPropagation()} className="text-[9px] px-2 py-1 bg-green-100 text-green-700 font-black rounded uppercase tracking-widest hover:bg-green-500 hover:text-white transition-colors">📞 Call</a>}
+                                       <span className="text-[8px] px-2 py-1 bg-red-100 text-red-600 font-black rounded uppercase">Abandoned</span>
+                                     </div>
                                    </div>
-                                 </div>
-                                 );
-                              })}
-                              {tabMissing.length === 0 && manifest.length > 0 && <p className="text-green-500 text-xs font-black uppercase text-center w-full py-10">100% Attendance Reached!</p>}
+                                   );
+                                })}
+                                {tabMissing.length === 0 && manifest.length > 0 && <p className="text-green-500 text-xs font-black uppercase text-center w-full py-10 col-span-2">100% Attendance Reached!</p>}
+                              </div>
                             </div>
                           )}
 
@@ -1243,14 +1397,14 @@ export default function CoordinatorPage() {
                             <div className="grid md:grid-cols-2 gap-3">
                               {tabManual.map((at, i) => (
                                  <div key={i} className="p-4 rounded-2xl border border-gray-200 bg-gray-50 flex justify-between items-center group hover:border-red-200 transition-all">
-                                   <div onClick={() => setSelectedStudent({studentName: at.studentName, vtuNumber: at.vtuNumber, enteredBy: at.enteredBy})} className="cursor-pointer flex-grow">
-                                     <p className="font-bold text-sm text-gray-900">{at.studentName}</p>
-                                     <p className="text-[10px] font-mono font-bold text-gray-500">{at.vtuNumber}</p>
+                                   <div onClick={() => setSelectedStudent({studentName: at.studentName, vtuNumber: at.vtuNumber || at.vtu, enteredBy: at.enteredBy})} className="cursor-pointer flex-grow">
+                                     <p className="font-bold text-sm text-gray-900">{at.studentName || 'Unknown'}</p>
+                                     <p className="text-[10px] font-mono font-bold text-gray-500">{at.vtuNumber || at.vtu}</p>
                                    </div>
                                    <div className="flex items-center gap-2">
-                                     <div className="text-right"><p className="text-[8px] bg-gray-800 text-white px-2 py-1 rounded font-black uppercase mb-1">Override</p><p className="text-[8px] font-bold text-gray-400">{at.enteredBy?.split('@')[0]}</p></div>
+                                     <div className="text-right"><p className="text-[8px] bg-gray-800 text-white px-2 py-1 rounded font-black uppercase tracking-widest mb-1">{at.overrideCategory || 'Manual'}</p><p className="text-[8px] font-bold text-gray-400">{at.enteredBy?.split('@')[0]}</p></div>
                                      <button 
-                                       onClick={(e) => { e.stopPropagation(); if(confirm(`Remove ${at.vtuNumber}?`)) handleLocalRemove(at.vtuNumber); }}
+                                       onClick={(e) => { e.stopPropagation(); if(confirm(`Remove ${at.vtuNumber || at.vtu}?`)) handleLocalRemove(at.vtuNumber || at.vtu); }}
                                        className="ml-2 p-2 bg-red-50 text-red-600 rounded-xl opacity-0 group-hover:opacity-100 active:scale-90 transition-all shadow-sm border border-red-100"
                                      >
                                        ✕

@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { auth } from "../../lib/firebase";
-import { signInWithPopup, GoogleAuthProvider, signInWithCredential, User, onAuthStateChanged } from "firebase/auth";
+import { signInWithPopup, GoogleAuthProvider, signInWithCredential, User, onAuthStateChanged, setPersistence, browserLocalPersistence } from "firebase/auth";
 import { Capacitor } from '@capacitor/core';
 import { GoogleAuth } from '@codetrix-studio/capacitor-google-auth';
 import Link from 'next/link';
@@ -83,6 +83,9 @@ export default function LoginPage() {
       setIsSigningIn(true);
       setError("");
       setLoading(true); 
+
+      // 1. Force persistence so they don't get logged out if they close the app/APK
+      await setPersistence(auth, browserLocalPersistence);
 
       let resultUser: User;
 
