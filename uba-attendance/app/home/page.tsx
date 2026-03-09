@@ -128,8 +128,9 @@ export default function HomePage() {
         setLoading(false); // Stop spinner immediately!
     }
 
-    // 🛑 ZERO-READ LOCK: If they are just looking at the QR code and have cache, DO NOT hit Firebase.
-    if (skipNetwork && cachedProfile) {
+    // 🛑 UPDATED LOCK: If they are on the 'home' view, ALWAYS check for live sessions
+    // even if we have a cached profile.
+    if (skipNetwork && cachedProfile && activeView !== 'home') {
         return; 
     }
 
@@ -288,27 +289,24 @@ export default function HomePage() {
   // ==========================================
   // 3B. EXCUSE SUBMISSION WITH GEOLOCATION
   // ==========================================
-  const handleSubmitExcuse = async (sessionId: string) => {
+  const handleSubmitExcuse = async (meetingId: string) => {
     setIsSubmittingExcuse(true);
     try {
       const user = auth.currentUser;
       if (!user) throw new Error('Not authenticated');
       const token = await user.getIdToken();
 
-      // Ensure we have a valid VTU before sending
+      // Ensure we have the student's VTU
       const vtuToSubmit = userData?.vtuNumber || user.email?.split('@')[0].toUpperCase().replace(/\D/g, '');
-      if (!vtuToSubmit) throw new Error('VTU ID not found');
+      if (!vtuToSubmit) throw new Error('VTU ID not found. Setup your profile first.');
 
       const position: GeolocationPosition = await new Promise((resolve, reject) => 
-        navigator.geolocation.getCurrentPosition(resolve, reject, { 
-          enableHighAccuracy: true, 
-          timeout: 10000 
-        })
+        navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 10000 })
       );
       const { latitude, longitude } = position.coords;
 
-      // Log for debugging
-      console.log("Submitting excuse for:", sessionId, "VTU:", vtuToSubmit);
+      // FIX: Use 'meetingId' consistently
+      console.log("Submitting excuse for:", meetingId, "VTU:", vtuToSubmit);
 
       const res = await fetch(`${API_URL}/meeting/excuse/submit`, {
         method: 'POST',
@@ -317,7 +315,7 @@ export default function HomePage() {
           'Authorization': `Bearer ${token}` 
         },
         body: JSON.stringify({ 
-          meetingId: sessionId, // Ensure this is the actual Meeting ID
+          meetingId: meetingId, 
           vtu: vtuToSubmit, 
           reason: excuseReason, 
           lat: latitude, 
@@ -326,20 +324,14 @@ export default function HomePage() {
       });
 
       const result = await res.json();
+      if (!res.ok) throw new Error(result.error || result.message || 'Failed to submit');
 
-      if (!res.ok) {
-        throw new Error(result.error || result.message || 'Failed to submit excuse');
-      }
-
-      alert('Excuse submitted successfully! ✅');
+      alert('Excuse submitted! ✅');
       setShowExcuseModal(null);
       setExcuseReason('');
-      
-      // Force refresh data to clear the pending flag
-      fetchUserStatus(user, false);
+      fetchUserStatus(user, false); 
     } catch (err: any) {
-      console.error("Submission Error:", err);
-      alert(err.message || 'Could not submit excuse. Please try again.');
+      alert(err.message || 'Could not submit excuse');
     } finally {
       setIsSubmittingExcuse(false);
     }
@@ -444,7 +436,7 @@ export default function HomePage() {
               <button onClick={() => setShowExcuseModal(null)} className="text-white font-black text-2xl">&times;</button>
             </div>
             <div className="p-6 space-y-4">
-              <p className="text-sm text-gray-600">Session: <strong>{showExcuseModal.sessionId}</strong></p>
+              <p className="text-sm text-gray-600">Session: <strong>{showExcuseModal.meetingId}</strong></p>
               <p className="text-xs text-gray-500">Your current GPS location will be captured for verification.</p>
               <textarea 
                 value={excuseReason} 
@@ -454,7 +446,7 @@ export default function HomePage() {
                 rows={4} 
               />
               <button 
-                onClick={() => handleSubmitExcuse(showExcuseModal.sessionId)} 
+                onClick={() => handleSubmitExcuse(showExcuseModal.meetingId)} 
                 disabled={isSubmittingExcuse || !excuseReason.trim()} 
                 className="w-full py-4 bg-amber-500 text-white font-black rounded-2xl uppercase text-sm disabled:opacity-50"
               >
@@ -672,7 +664,7 @@ export default function HomePage() {
                  {pendingExcuses.map((ex, i) => (
                    <div key={i} className="flex justify-between items-center bg-white rounded-2xl p-4 border border-amber-100">
                      <div>
-                       <p className="font-bold text-sm">{ex.sessionId}</p>
+                       <p className="font-bold text-sm">{ex.meetingId}</p>
                        <p className="text-xs text-gray-500 truncate max-w-[200px]">{ex.reason}</p>
                      </div>
                      <span className="text-[9px] font-black bg-amber-100 text-amber-700 px-3 py-1 rounded-full uppercase">Awaiting Review</span>
@@ -759,7 +751,7 @@ export default function HomePage() {
                    <div key={i} className="bg-white rounded-[2rem] p-6 border-2 border-amber-200 shadow-lg flex flex-col md:flex-row justify-between items-start md:items-center gap-4 group hover:border-amber-400 transition-all">
                      <div>
                        <span className="text-[9px] font-black bg-amber-100 text-amber-700 px-3 py-1 rounded-full uppercase tracking-widest mb-2 inline-block">Action Required</span>
-                       <h3 className="font-black text-lg text-gray-900 uppercase tracking-tight">{ex.eventTitle || ex.sessionId}</h3>
+                       <h3 className="font-black text-lg text-gray-900 uppercase tracking-tight">{ex.eventTitle || ex.meetingId}</h3>
                        <p className="text-xs font-bold text-gray-500 mt-1">If you have a valid reason for missing this event, submit it now. GPS verification is required.</p>
                      </div>
                      <button 
