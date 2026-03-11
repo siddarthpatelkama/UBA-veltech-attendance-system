@@ -34,6 +34,8 @@ const IST_FULL_OPTIONS: Intl.DateTimeFormatOptions = {
 };
 
 export default function AdminPage() {
+  // --- ROSTER LIMIT STATE FOR PAGINATION ---
+  const [rosterLimit, setRosterLimit] = useState(15);
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const sosFileInputRef = useRef<HTMLInputElement>(null);
@@ -479,13 +481,26 @@ export default function AdminPage() {
   // CRM API Calls
   const executeCrmAction = async (endpoint: string, payload: any, successMsg: string) => {
     setIsProcessing(true);
-    const token = await auth.currentUser?.getIdToken();
-    const res = await fetch(`${API_URL}${endpoint}`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(payload)
-    });
-    if (res.ok) { showToast(successMsg); fetchData(true); } 
-    else { showToast("Action failed"); }
-    setIsProcessing(false);
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      const res = await fetch(`${API_URL}${endpoint}`, {
+        method: 'POST', 
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, 
+        body: JSON.stringify(payload) // This sends the { vtu: u.vtuNumber }
+      });
+      
+      if (res.ok) {
+        showToast(successMsg);
+        fetchData(true); // REFRESH the list immediately
+      } else {
+        const errorData = await res.json();
+        showToast(errorData.error || "Action Failed");
+      }
+    } catch (e) {
+      showToast("Network error");
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   const downloadMeetingCSV = (meetingId: string, meetingTitle: string) => {
@@ -727,7 +742,19 @@ export default function AdminPage() {
   }) : null;
   const searchedUserAttendance = searchedUser ? data.attendance?.filter((a:any) => a.vtuNumber === searchedUser.vtuNumber) : [];
 
-  if (initialLoad) return <div className="h-screen flex items-center justify-center bg-white"><div className="animate-spin rounded-full h-10 w-10 border-t-4 border-[#FF5722]"></div></div>;
+  // FIXED: Removed networkLocked which doesn't exist here
+  if (initialLoad || loading) return (
+    <div className="min-h-screen bg-gray-50 p-4 md:p-6 flex flex-col gap-6 w-full max-w-7xl mx-auto">
+      <div className="h-20 bg-white rounded-3xl animate-pulse shadow-sm w-full"></div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {[1, 2, 3, 4].map(i => <div key={i} className="h-32 bg-white rounded-[2rem] animate-pulse shadow-sm"></div>)}
+      </div>
+      <div className="grid lg:grid-cols-12 gap-6">
+        <div className="lg:col-span-8 h-96 bg-white rounded-[3rem] animate-pulse shadow-sm"></div>
+        <div className="lg:col-span-4 h-96 bg-white rounded-[3rem] animate-pulse shadow-sm"></div>
+      </div>
+    </div>
+  );
 
   return (
     <ProtectedRoute allowedRoles={["head"]}>
@@ -823,7 +850,7 @@ export default function AdminPage() {
           <div className="max-w-7xl mx-auto px-4 md:px-6 py-4 flex justify-between items-center">
             <div className="flex items-center gap-3">
               <img src="/uba-logo.png" className="h-10 w-10 object-contain rounded-full" alt="UBA" />
-              <h1 className="font-black uppercase tracking-tighter italic text-sm md:text-xl text-gray-900 hidden md:block">HQ Console</h1>
+              <h1 className="font-black uppercase tracking-tighter italic text-sm md:text-xl text-gray-900 hidden md:block">UBA CLUB</h1>
             </div>
             
             {/* DESKTOP TABS */}
@@ -1022,7 +1049,7 @@ export default function AdminPage() {
                         }}
                         className="w-full h-full bg-[#FF5722] text-white font-black rounded-xl uppercase tracking-widest shadow-lg hover:bg-orange-600 transition active:scale-95"
                       >
-                        Send Push
+                        {isProcessing ? 'Transmitting to Server...' : 'FIRE NOTIFICATION 🚀'}
                       </button>
                     </div>
                   </div>
@@ -1187,7 +1214,7 @@ export default function AdminPage() {
                         <div key={i} onClick={() => setSelectedStudent({...at, studentName: dbUser?.name || at.studentName || 'Unknown', userData: dbUser || at.userData || {}, dept: dbUser?.dept || at.dept || 'N/A', year: dbUser?.year || at.year || 'N/A', gender: dbUser?.gender || at.gender || 'N/A'})} className="p-4 rounded-2xl border border-gray-100 bg-[#FFF9F5]/40 flex justify-between items-center hover:bg-white hover:border-[#FF5722] hover:shadow-md cursor-pointer transition-all group">
                            <div>
                              <p className="font-bold text-sm text-gray-900 truncate w-32 capitalize group-hover:text-[#FF5722] transition-colors">{at.studentName}</p>
-                             <p className="text-[10px] font-mono font-black text-gray-400 group-hover:text-gray-900 transition-colors mt-0.5">{at.vtuNumber}</p>
+                             <p className="text-[10px] font-mono font-bold text-gray-400 group-hover:text-gray-900 transition-colors mt-0.5">{at.vtuNumber}</p>
                            </div>
                            {at.isOverride && <span className="block text-[7px] text-red-500 font-black uppercase tracking-[0.2em] mt-1">Manual</span>}
                         </div>
@@ -1242,29 +1269,33 @@ export default function AdminPage() {
           {adminTab === 'roster' && (
             <div className="space-y-6 animate-in fade-in">
               
-              {/* TOP ACTION BAR: Search & Filters */}
-              <div className="bg-white p-6 rounded-3xl shadow-sm border border-[#FF5722] flex flex-col md:flex-row gap-4 items-center justify-between sticky top-24 z-30">
-                <div className="flex w-full md:w-1/2 gap-2 relative">
-                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-lg">🔎</span>
-                  <input 
-                    type="text" 
-                    placeholder="Search VTU, Name, or Dept..." 
-                    value={vtuLookup} 
-                    onChange={(e) => setVtuLookup(e.target.value)} 
-                    className="w-full pl-12 pr-4 py-4 rounded-xl outline-none font-black text-sm bg-[#FFF9F5] border border-orange-100 focus:border-[#FF5722] transition-colors"
-                  />
-                </div>
-                
-                <div className="flex w-full md:w-auto gap-2 overflow-x-auto no-scrollbar">
-                  <select value={crmFilters.year} onChange={e => setCrmFilters({...crmFilters, year: e.target.value})} className="px-4 py-4 bg-gray-50 border border-gray-100 rounded-xl font-bold text-xs outline-none">
-                    <option value="All">All Years</option><option value="1">Year 1</option><option value="2">Year 2</option><option value="3">Year 3</option><option value="4">Year 4</option>
-                  </select>
-                  <select value={crmTab} onChange={e => setCrmTab(e.target.value as any)} className="px-4 py-4 bg-gray-50 border border-gray-100 rounded-xl font-bold text-xs outline-none">
-                    <option value="members">Official Members</option><option value="guests">Guests / Walk-ins</option>
-                  </select>
-                  <button onClick={() => setShowExportModal(true)} className="px-6 py-4 bg-gradient-to-r from-green-500 to-green-600 text-white font-black rounded-xl uppercase tracking-widest text-[10px] shadow-md hover:shadow-lg transition-all whitespace-nowrap">
-                    📊 Export CSV
-                  </button>
+              {/* TOP ACTION BAR: FIXED LAYOUT */}
+              <div className="bg-white p-4 md:p-6 rounded-3xl shadow-md border border-[#FF5722]/20 flex flex-col gap-4 mt-6">
+                <div className="flex flex-col md:flex-row gap-4 w-full">
+                  <div className="relative flex-grow">
+                    <span className="absolute left-4 top-1/2 -translate-y-1/2">🔍</span>
+                    <input 
+                      type="text" 
+                      placeholder="Search VTU, Name..." 
+                      value={vtuLookup} 
+                      onChange={(e) => setVtuLookup(e.target.value)} 
+                      className="w-full pl-12 pr-4 py-4 rounded-2xl outline-none font-black text-sm bg-gray-50 border border-transparent focus:bg-white focus:border-[#FF5722] transition-all"
+                    />
+                  </div>
+                  
+                  <div className="flex gap-2 overflow-x-auto no-scrollbar shrink-0">
+                    <select value={crmFilters.year} onChange={e => setCrmFilters({...crmFilters, year: e.target.value})} className="px-4 py-4 bg-gray-50 rounded-2xl font-bold text-xs outline-none border border-transparent focus:border-[#FF5722]">
+                      <option value="All">All Years</option>
+                      <option value="1">Year 1</option><option value="2">Year 2</option>
+                    </select>
+                    <select value={crmTab} onChange={e => setCrmTab(e.target.value as any)} className="px-4 py-4 bg-gray-50 rounded-2xl font-bold text-xs outline-none border border-transparent focus:border-[#FF5722]">
+                      <option value="members">Members</option>
+                      <option value="guests">Guests</option>
+                    </select>
+                    <button onClick={() => setShowExportModal(true)} className="px-6 py-4 bg-green-600 text-white font-black rounded-2xl uppercase text-[10px] shadow-lg active:scale-95 transition-all">
+                      Export
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -1293,84 +1324,56 @@ export default function AdminPage() {
               </div>
 
               {/* UNIFIED DATA TABLE */}
-              <div className="bg-white rounded-3xl border border-gray-200 shadow-sm overflow-hidden">
+              <div className="bg-white rounded-3xl border border-gray-200 shadow-sm overflow-hidden mt-6">
                 <div className="overflow-x-auto">
                   <table className="w-full text-left border-collapse">
-                    <thead>
-                      <tr className="bg-gray-50 border-b-2 border-gray-100 text-[9px] uppercase tracking-widest text-gray-500">
-                        <th className="p-4 font-black">Student Details</th>
-                        <th className="p-4 font-black text-center">Attendance</th>
-                        <th className="p-4 font-black">Device Lock</th>
-                        <th className="p-4 font-black text-right">Actions</th>
+                    <thead className="bg-gray-50 border-b border-gray-100">
+                      <tr className="text-[10px] font-black uppercase tracking-widest text-gray-400">
+                        <th className="p-4">Student Details</th>
+                        <th className="p-4 text-center">Events</th>
+                        <th className="p-4">Device Status</th>
+                        <th className="p-4 text-right">Action</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-50">
-                      {crmUsers
-                        .filter((u: any) => {
-                           const search = vtuLookup.toLowerCase();
-                           return String(u.vtuNumber).toLowerCase().includes(search) || 
-                                  (u.name || '').toLowerCase().includes(search) || 
-                                  (u.dept || '').toLowerCase().includes(search);
-                        })
-                        .map((u: any) => (
-                        <tr key={u.vtuNumber} className="hover:bg-[#FFF9F5] transition-colors group">
-                          <td className="p-4 cursor-pointer" onClick={() => setSelectedStudent({studentName: u.name, vtuNumber: u.vtuNumber, dept: u.dept, year: u.year, gender: u.gender, userData: u})}>
-                            <p className="font-black text-sm text-gray-900 capitalize group-hover:text-[#FF5722] transition-colors">{u.name || 'Unknown'}</p>
-                            <p className="text-[10px] font-mono font-bold text-gray-500 mt-1">{u.vtuNumber} • {u.dept || 'N/A'} • Yr {u.year || 'N/A'}</p>
+                      {crmUsers.slice(0, rosterLimit).map((u: any) => (
+                        <tr key={u.vtuNumber} className="hover:bg-orange-50/30 transition-colors">
+                          <td className="p-4">
+                            <p className="font-black text-sm text-gray-900">{u.name}</p>
+                            <p className="text-[10px] font-bold text-gray-400 uppercase">{u.vtuNumber} • {u.dept}</p>
                           </td>
                           <td className="p-4 text-center">
-                            <span className="inline-block px-3 py-1 bg-orange-50 text-[#FF5722] font-black text-sm rounded-lg border border-orange-100">
-                              {u.eventsAttended}
-                            </span>
+                            <span className="bg-white px-3 py-1 rounded-lg border font-black text-orange-600">{u.eventsAttended}</span>
                           </td>
                           <td className="p-4">
-                            {u.registeredDeviceId ? (
-                              <span className="px-2 py-1 bg-gray-100 text-gray-600 rounded text-[9px] font-mono font-bold flex items-center gap-1 w-max">
-                                🔒 Locked
-                              </span>
+                            {/* FIX: Check both u.registeredDeviceId and nested u.userData */}
+                            {(u.registeredDeviceId || u.userData?.registeredDeviceId) ? (
+                              <span className="text-[9px] font-black text-gray-500 bg-gray-100 px-2 py-1 rounded">🔒 LOCKED</span>
                             ) : (
-                              <span className="px-2 py-1 bg-red-50 text-red-500 rounded text-[9px] font-black flex items-center gap-1 w-max animate-pulse">
-                                🔓 Unset
-                              </span>
+                              <span className="text-[9px] font-black text-red-500 bg-red-50 px-2 py-1 rounded animate-pulse">🔓 UNSET</span>
                             )}
                           </td>
                           <td className="p-4 text-right">
-                            {crmTab === 'guests' ? (
-                              <button 
-                                onClick={() => executeCrmAction('/admin/crm/promote', { vtu: u.vtuNumber }, "Promoted to Master Roster!")}
-                                className="bg-[#111827] text-white px-4 py-2 rounded-xl font-black text-[9px] uppercase tracking-widest hover:bg-green-600 transition-colors shadow-sm"
-                              >
-                                Promote to Member
-                              </button>
-                            ) : (
-                              <div className="flex justify-end gap-2">
-                                {u.registeredDeviceId && (
-                                  <button onClick={() => handleResetDevice(u.email || u.vtuNumber)} className="bg-gray-100 text-gray-600 px-3 py-2 rounded-xl font-black text-[9px] uppercase tracking-widest hover:bg-gray-200 transition-colors" title="Reset Device Binding">
-                                    Reset Phone
-                                  </button>
-                                )}
-                                <button 
-                                  onClick={() => executeCrmAction('/admin/crm/demote', { vtu: u.vtuNumber }, "Demoted to Guest")}
-                                  className="bg-red-50 text-red-500 px-3 py-2 rounded-xl font-black text-[9px] uppercase tracking-widest hover:bg-red-500 hover:text-white transition-colors"
-                                >
-                                  Demote
-                                </button>
-                              </div>
-                            )}
+                            <button 
+                              onClick={() => executeCrmAction(crmTab === 'guests' ? '/admin/crm/promote' : '/admin/crm/demote', { vtu: u.vtuNumber }, "Roster Updated!")}
+                              className={`px-4 py-2 rounded-xl font-black text-[9px] uppercase tracking-widest active:scale-95 transition-all ${crmTab === 'guests' ? 'bg-green-600 text-white' : 'bg-red-50 text-red-500'}`}
+                            >
+                              {crmTab === 'guests' ? 'Promote' : 'Demote'}
+                            </button>
                           </td>
                         </tr>
                       ))}
-                      
-                      {crmUsers.length === 0 && (
-                        <tr>
-                          <td colSpan={4} className="p-10 text-center text-gray-400 font-black uppercase text-xs tracking-widest">
-                            No students found in this category
-                          </td>
-                        </tr>
-                      )}
                     </tbody>
                   </table>
                 </div>
+                {crmUsers.length > rosterLimit && (
+                  <button 
+                    onClick={() => setRosterLimit(10000)} 
+                    className="w-full py-6 bg-gray-50 text-gray-500 font-black uppercase text-xs tracking-widest hover:bg-gray-100 active:scale-95 transition-all border-t border-gray-100"
+                  >
+                    Load All {crmUsers.length} Students ↓
+                  </button>
+                )}
               </div>
 
             </div>

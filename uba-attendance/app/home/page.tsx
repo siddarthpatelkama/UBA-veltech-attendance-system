@@ -192,20 +192,39 @@ export default function HomePage() {
       setLeaderboard(historyData.leaderboard || []);
       
       localStorage.setItem('uba_student_profile', JSON.stringify(combinedUserData));
-            // 🚀 ONESIGNAL INIT & TAGGING
-            if (typeof window !== 'undefined' && (window as any).Capacitor?.isNativePlatform()) {
-              try {
-                const OneSignal = (window as any).plugins?.OneSignal;
-                if (OneSignal) {
-                  OneSignal.initialize("19e04964-ec0f-44c4-a1df-e56989f568f8"); 
-                  OneSignal.Notifications.requestPermission(true);
-                  // Tag the phone so the backend knows who to send messages to
-                  OneSignal.User.addTag("vtu", combinedUserData.vtuNumber);
-                  OneSignal.User.addTag("role", combinedUserData.role || "student");
-                  OneSignal.User.addTag("year", combinedUserData.year || "1");
+            // 🚀 ONESIGNAL INIT (NATIVE + WEB TWIST)
+            if (typeof window !== 'undefined') {
+              if ((window as any).Capacitor?.isNativePlatform()) {
+                // 📱 NATIVE APP USERS
+                try {
+                  const OneSignal = (window as any).plugins?.OneSignal;
+                  if (OneSignal) {
+                    OneSignal.initialize("19e04964-ec0f-44c4-a1df-e56989f568f8"); 
+                    OneSignal.Notifications.requestPermission(true);
+                    OneSignal.User.addTag("vtu", combinedUserData.vtuNumber);
+                    OneSignal.User.addTag("role", combinedUserData.role || "student");
+                    OneSignal.User.addTag("year", combinedUserData.year || "1");
+                  }
+                } catch (err) { console.log("Native OneSignal skipped"); }
+              } else {
+                // 💻 THE TWIST: WEB USERS (Only prompt if they DON'T have the mobile app)
+                if (!combinedUserData.registeredDeviceId) {
+                  // Inject Web SDK
+                  const script = document.createElement('script');
+                  script.src = "https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js";
+                  script.async = true;
+                  document.head.appendChild(script);
+
+                  (window as any).OneSignalDeferred = (window as any).OneSignalDeferred || [];
+                  (window as any).OneSignalDeferred.push(function(OneSignal: any) {
+                    OneSignal.init({
+                      appId: "19e04964-ec0f-44c4-a1df-e56989f568f8",
+                    });
+                    OneSignal.User.addTag("vtu", combinedUserData.vtuNumber);
+                    OneSignal.User.addTag("role", combinedUserData.role || "student");
+                    OneSignal.User.addTag("year", combinedUserData.year || "1");
+                  });
                 }
-              } catch (err) {
-                console.log("OneSignal Init skipped (Not running in Native APK)");
               }
             }
       localStorage.setItem('uba_student_history', JSON.stringify(historyData.history || []));
@@ -516,7 +535,7 @@ export default function HomePage() {
               <button onClick={() => setShowExcuseModal(null)} className="text-white font-black text-2xl">&times;</button>
             </div>
             <div className="p-6 space-y-4">
-              <p className="text-sm text-gray-600">Session: <strong>{showExcuseModal.meetingId}</strong></p>
+              <p className="text-sm text-gray-600">Session: <strong>{showExcuseModal.eventTitle || showExcuseModal.meetingId}</strong></p>
               <p className="text-xs text-gray-500">Your current GPS location will be captured for verification.</p>
               <textarea 
                 value={excuseReason} 
@@ -528,7 +547,7 @@ export default function HomePage() {
               <button 
                 onClick={() => handleSubmitExcuse(showExcuseModal.meetingId)} 
                 disabled={isSubmittingExcuse || !excuseReason.trim()} 
-                className="w-full py-4 bg-amber-500 text-white font-black rounded-2xl uppercase text-sm disabled:opacity-50"
+                className="w-full py-4 bg-amber-500 text-white font-black rounded-2xl uppercase text-sm disabled:opacity-50 shadow-md hover:bg-amber-600 active:scale-95 transition-all"
               >
                 {isSubmittingExcuse ? 'Submitting...' : 'Submit Excuse with GPS'}
               </button>
@@ -733,20 +752,20 @@ export default function HomePage() {
         {activeView === 'history' && (
           <div className="space-y-8 animate-in slide-in-from-right-8">
              <div className="flex justify-between items-end border-b-2 border-gray-100 pb-6">
-                <h2 className="text-4xl font-black uppercase italic tracking-tighter">My contibution</h2>
+                <h2 className="text-4xl font-black uppercase italic tracking-tighter">My Contribution</h2>
                 <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">{history.length} Entries</p>
              </div>
 
              {/* Pending Excuses Banner */}
              {pendingExcuses.length > 0 && (
-               <div className="bg-amber-50 border-2 border-amber-200 rounded-3xl p-6 space-y-3">
-                 <h3 className="font-black uppercase text-amber-700 text-sm">Pending Excuses ({pendingExcuses.length})</h3>
-                 {pendingExcuses.map((ex, i) => (
-                   <div key={i} className="flex justify-between items-center bg-white rounded-2xl p-4 border border-amber-100">
-                     <div>
-                       <p className="font-bold text-sm">{ex.meetingId}</p>
-                       <p className="text-xs text-gray-500 truncate max-w-[200px]">{ex.reason}</p>
-                     </div>
+              <div className="bg-amber-50 border-2 border-amber-200 rounded-3xl p-6 space-y-3">
+                <h3 className="font-black uppercase text-amber-700 text-sm">Pending Excuses ({pendingExcuses.length})</h3>
+                {pendingExcuses.map((ex, i) => (
+                  <div key={i} className="flex justify-between items-center bg-white rounded-2xl p-4 border border-amber-100">
+                    <div>
+                      <p className="font-bold text-sm">{ex.eventTitle || ex.meetingId}</p>
+                      <p className="text-xs text-gray-500 truncate max-w-[200px]">{ex.reason}</p>
+                    </div>
                      <span className="text-[9px] font-black bg-amber-100 text-amber-700 px-3 py-1 rounded-full uppercase">Awaiting Review</span>
                    </div>
                  ))}
@@ -771,12 +790,12 @@ export default function HomePage() {
                      <div className="flex justify-between mb-4">
                         <span className={`text-[8px] font-black px-2 py-1 rounded ${h.isOverride ? 'bg-yellow-50 text-yellow-600' : 'bg-green-50 text-green-600'}`}>{h.isOverride ? 'MANUAL' : 'VERIFIED'}</span>
                         <p className="text-[10px] font-mono text-gray-300">
-                          {new Date(h.timestamp).toLocaleString('en-IN', {
-                            timeZone: 'Asia/Kolkata',
-                            hour: '2-digit',
-                            minute: '2-digit',
-                            hour12: true
-                          })}
+                          {(() => {
+                            const ts = h.timestamp?.seconds ? h.timestamp.seconds * 1000 : h.timestamp;
+                            if (!ts) return h.dateString || 'Time N/A';
+                            const d = new Date(ts);
+                            return isNaN(d.getTime()) ? (h.dateString || 'Time N/A') : d.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true });
+                          })()}
                         </p>
                      </div>
                      <h3 className="text-xl font-black uppercase italic tracking-tighter group-hover:text-[#FF5722] transition-colors">{h.meetingTitle || 'Field Session'}</h3>
@@ -902,7 +921,7 @@ export default function HomePage() {
                   <p className={`text-sm font-black ${selectedHistoryItem.isOverride ? 'text-yellow-600' : 'text-green-600'}`}>{selectedHistoryItem.isOverride ? 'Manually Injected' : 'Verified Scan'}</p>
                 </div>
               </div>
-              <button onClick={() => setSelectedHistoryItem(null)} className="w-full bg-[#111827] text-white py-4 rounded-2xl font-black uppercase text-xs tracking-widest mt-4 hover:bg-black transition-colors shadow-xl">Close Dossier</button>
+              <button onClick={() => setSelectedHistoryItem(null)} className="w-full bg-[#111827] text-white py-4 rounded-2xl font-black uppercase text-xs tracking-widest mt-4 hover:bg-black transition-colors shadow-xl active:scale-95">Close Dossier</button>
             </div>
           </div>
         </div>

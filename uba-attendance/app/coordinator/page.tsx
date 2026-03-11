@@ -785,20 +785,42 @@ export default function CoordinatorPage() {
 
   const handleCloseMeeting = async () => {
     if (isOfflineMode) {
-      // LOCAL CLOSE: Update meetings state and localStorage directly
+      // Local close logic remains the same
       setMeetings(prev => prev.map(m => m.id === confirmEndSession ? { ...m, status: 'closed', attendanceActive: false } : m));
       setConfirmEndSession(null);
       showToast("Session Closed Locally (Vault Mode)");
       return;
     }
-    const token = await auth.currentUser?.getIdToken();
-    await fetch(`${API_URL}/meeting/close`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ meetingId: confirmEndSession })
-    });
-    setConfirmEndSession(null);
-    fetchData(false);
-    showToast("Session Ended");
+
+    // 1. SNAPSHOT: Save the current state in case the server fails
+    const previousMeetings = [...meetings];
+    const meetingIdToClose = confirmEndSession;
+
+    // 2. OPTIMISTIC UPDATE: Instantly change the UI to 'closed' (Zero Latency)
+    setMeetings(prev => prev.map(m => 
+      m.id === meetingIdToClose ? { ...m, status: 'closed', attendanceActive: false } : m
+    ));
+    setConfirmEndSession(null); // Close the popup modal instantly
+
+    // 3. THE SERVER REQUEST
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      const res = await fetch(`${API_URL}/meeting/close`, {
+        method: 'POST', 
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ meetingId: meetingIdToClose })
+      });
+
+      if (!res.ok) throw new Error("Server rejected closure");
+      // If we reach here, the server successfully matched our Optimistic UI!
+      showToast("Session Ended Successfully");
+
+    } catch (error) {
+      // 4. THE ROLLBACK: The server failed! Revert the UI back to active.
+      console.error("Optimistic UI Rollback triggered:", error);
+      setMeetings(previousMeetings); // Instantly restore the active session on screen
+      showToast("🚨 Failed to close session on server. Reverted.");
+    }
   };
 
   const formatTime = (seconds: number) => {
@@ -864,8 +886,18 @@ export default function CoordinatorPage() {
   const tabSuspicious = (suspiciousLogs || []).filter(s => s.meetingId === displayId && (!activePhase || s.phaseId === activePhase.id));
 
   if (initialLoad && !networkLocked) return (
-    <div className="h-screen flex items-center justify-center bg-white">
-      <div className="animate-spin rounded-full h-10 w-10 border-t-4 border-[#FF5722]"></div>
+    <div className="min-h-screen bg-gray-50 p-4 md:p-6 flex flex-col gap-6 w-full max-w-7xl mx-auto">
+      {/* Skeleton Navbar */}
+      <div className="h-20 bg-white rounded-3xl animate-pulse shadow-sm w-full"></div>
+      {/* Skeleton Stat Boxes */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {[1, 2, 3, 4].map(i => <div key={i} className="h-32 bg-white rounded-[2rem] animate-pulse shadow-sm"></div>)}
+      </div>
+      {/* Skeleton Main Dashboard */}
+      <div className="grid lg:grid-cols-12 gap-6">
+        <div className="lg:col-span-8 h-96 bg-white rounded-[3rem] animate-pulse shadow-sm"></div>
+        <div className="lg:col-span-4 h-96 bg-white rounded-[3rem] animate-pulse shadow-sm"></div>
+      </div>
     </div>
   );
 

@@ -5,7 +5,7 @@ if (!global.ubaCache) {
 }
 const CACHE_DURATION = 15 * 60 * 1000; // 15 Minutes
 const db = require("../config/firebase");
-const fcm = require('../utils/fcm'); // FCM Notification Engine
+const onesignal = require('../utils/onesignal');
 
 // --- SESSION CREATION ---
 exports.createMeeting = async (req, res) => {
@@ -151,7 +151,7 @@ exports.createPhase = async (req, res) => {
     });
     
     // --- FCM Trigger 2: Phase Live Broadcast ---
-      await onesignal.sendNotification(
+        await onesignal.sendNotification(
       `meeting_${meetingId}`, // Subscribers to this specific event
       `🔴 SESSION LIVE`,
       `${phaseTitle} has started! Open your app to scan the QR code.`,
@@ -399,7 +399,7 @@ exports.closeAttendance = async (req, res) => {
             batch.delete(masterRef); // Remove from Club
 
             // --- FCM Trigger 3A: Account Demotion Alert ---
-              await onesignal.sendNotification(
+                await onesignal.sendNotification(
               `student_${student.vtu}`, // Targeted specifically to this student
               `🚨 UBA Account Demoted`,
               `You have missed 3 events. You have been removed from the Master Roster.`,
@@ -411,7 +411,7 @@ exports.closeAttendance = async (req, res) => {
             batch.update(masterRef, { strikes: currentStrikes });
 
             // --- FCM Trigger 3B: Strike Warning Alert ---
-              await onesignal.sendNotification(
+                await onesignal.sendNotification(
               `student_${student.vtu}`,
               `⚠️ Strike Added (${currentStrikes}/3)`,
               `You missed ${meetingData.title}. Submit an excuse with GPS immediately to avoid demotion.`,
@@ -430,7 +430,7 @@ exports.closeAttendance = async (req, res) => {
         const attendanceSnap2 = await db.collection("attendance").where("meetingId", "==", meetingId).get();
         const attendedCount = attendanceSnap2.size;
         const missingCount = (meetingData.manifest || []).length - attendedCount;
-        await onesignal.sendNotification(
+          await onesignal.sendNotification(
           'admin',
           `📊 Trip Closed: ${meetingData.title}`,
           `${attendedCount} Verified. ${missingCount} Missing. Strikes applied.`,

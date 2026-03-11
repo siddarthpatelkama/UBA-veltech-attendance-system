@@ -1,3 +1,56 @@
+// --- CRM Promotion/Demotion Logic ---
+exports.promoteToMember = async (req, res) => {
+  const { vtu } = req.body;
+  try {
+    const tempRef = db.collection("temporary_roster").doc(vtu);
+    const tempDoc = await tempRef.get();
+    
+    if (!tempDoc.exists) return res.status(404).json({ error: "Student not found in temporary list" });
+    
+    const studentData = tempDoc.data();
+
+    // Move to Master Roster & Set Member status
+    await db.collection("master_roster").doc(vtu).set({
+      ...studentData,
+      isGuest: false,
+      promotedAt: Date.now(),
+      promotedBy: req.user.email
+    });
+
+    await tempRef.delete(); // Remove the old entry
+    if (global.ubaCache) global.ubaCache.lastUpdated = 0; // Reset cache to show changes
+
+    res.json({ success: true, message: "Promoted to Member status!" });
+  } catch (error) {
+    res.status(500).json({ error: "Promotion failed" });
+  }
+};
+
+exports.demoteToGuest = async (req, res) => {
+  const { vtu } = req.body;
+  try {
+    const masterRef = db.collection("master_roster").doc(vtu);
+    const masterDoc = await masterRef.get();
+    
+    if (!masterDoc.exists) return res.status(404).json({ error: "Student not found in Master Roster" });
+
+    const studentData = masterDoc.data();
+
+    // Back to temporary roster & Set Guest status
+    await db.collection("temporary_roster").doc(vtu).set({
+      ...studentData,
+      isGuest: true,
+      demotedAt: Date.now()
+    });
+
+    await masterRef.delete();
+    if (global.ubaCache) global.ubaCache.lastUpdated = 0;
+
+    res.json({ success: true, message: "Demoted to Guest status" });
+  } catch (error) {
+    res.status(500).json({ error: "Demotion failed" });
+  }
+};
 // --- ADMIN BROADCAST CENTER & HISTORY ---
 const onesignal = require('../utils/onesignal');
 
