@@ -47,7 +47,47 @@ export default function AdminPage() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   
   // --- ENTERPRISE NAVIGATION STATE ---
-  const [adminTab, setAdminTab] = useState<'operations' | 'roster' | 'schedule'>('operations');
+  const [adminTab, setAdminTab] = useState<'operations' | 'roster' | 'schedule' | 'broadcast'>('operations');
+
+  // Broadcast Center States
+  const [broadcastHistory, setBroadcastHistory] = useState<any[]>([]);
+  const [selectedBroadcast, setSelectedBroadcast] = useState<any | null>(null);
+  const [broadcastForm, setBroadcastForm] = useState({ title: '', body: '', target: 'all_students' });
+
+  useEffect(() => {
+    if (adminTab === 'broadcast') {
+      const fetchHistory = async () => {
+        const token = await auth.currentUser?.getIdToken();
+        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "https://uba-veltech-attendance-backend-system.onrender.com"}/admin/broadcast/history`, { headers: { Authorization: `Bearer ${token}` }});
+        if (res.ok) {
+          const data = await res.json();
+          setBroadcastHistory(data.history);
+        }
+      };
+      fetchHistory();
+    }
+  }, [adminTab]);
+
+  const handleSendBroadcast = async () => {
+    if (!broadcastForm.title || !broadcastForm.body) return setToastMsg("Title and Message required!");
+    setIsProcessing(true);
+    const token = await auth.currentUser?.getIdToken();
+    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "https://uba-veltech-attendance-backend-system.onrender.com"}/admin/broadcast`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ targetTopic: broadcastForm.target, title: broadcastForm.title, body: broadcastForm.body })
+    });
+    if (res.ok) {
+      setToastMsg("Broadcast Sent! 🚀");
+      setBroadcastForm({ title: '', body: '', target: 'all_students' });
+      // Immediately refresh the history list
+      const historyRes = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "https://uba-veltech-attendance-backend-system.onrender.com"}/admin/broadcast/history`, { headers: { Authorization: `Bearer ${token}` }});
+      if (historyRes.ok) setBroadcastHistory((await historyRes.json()).history);
+    } else {
+      setToastMsg("Failed to send broadcast.");
+    }
+    setIsProcessing(false);
+  };
   
   // UI & UX Enhancement States
   const [analyticsViewMap, setAnalyticsViewMap] = useState<{ [key: string]: boolean }>({});
@@ -629,7 +669,6 @@ export default function AdminPage() {
   const getMeetingStats = (attendeesList: any[]) => {
     return attendeesList.reduce((acc: any, curr: any) => {
       // Find the user in the Master Roster (data.users)
-      // For emergency scans, vtu field is used instead of vtuNumber
       const vtuKey = curr.vtuNumber || curr.vtu;
       const user = (data.users || []).find((u: any) => String(u.vtuNumber) === String(vtuKey));
       
@@ -637,7 +676,8 @@ export default function AdminPage() {
       const gen = String(user?.gender || curr.gender || 'Unknown').toUpperCase();
       const year = String(user?.year || curr.year || 'Unknown');
       
-      if (!acc.years[year]) acc.years[year] = { Male: 0, Female: 0, total: 0 };
+      if (!acc.years[year]) acc.years[year] = { Male: 0, Female: 0, Unspecified: 0, total: 0 };
+      
       if (gen.startsWith('M')) { 
         acc.gender['Male'] = (acc.gender['Male'] || 0) + 1; 
         acc.years[year].Male += 1; 
@@ -645,11 +685,17 @@ export default function AdminPage() {
       else if (gen.startsWith('F')) { 
         acc.gender['Female'] = (acc.gender['Female'] || 0) + 1; 
         acc.years[year].Female += 1; 
+      } 
+      // THE FIX: Catch everyone else so the math equals the total!
+      else {
+        acc.gender['Unspecified'] = (acc.gender['Unspecified'] || 0) + 1; 
+        acc.years[year].Unspecified += 1;
       }
+      
       acc.years[year].total += 1;
       
       return acc;
-    }, { gender: { Male: 0, Female: 0 }, years: {} });
+    }, { gender: { Male: 0, Female: 0, Unspecified: 0 }, years: {} });
   };
 
   const availableMonths = useMemo(() => {
@@ -785,6 +831,7 @@ export default function AdminPage() {
               <button onClick={() => setAdminTab('operations')} className={`px-6 py-2.5 rounded-xl font-black text-xs uppercase tracking-widest transition-all ${adminTab === 'operations' ? 'bg-white text-[#FF5722] shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}>Operations</button>
               <button onClick={() => setAdminTab('roster')} className={`px-6 py-2.5 rounded-xl font-black text-xs uppercase tracking-widest transition-all ${adminTab === 'roster' ? 'bg-white text-[#FF5722] shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}>Roster & CRM</button>
               <button onClick={() => setAdminTab('schedule')} className={`px-6 py-2.5 rounded-xl font-black text-xs uppercase tracking-widest transition-all ${adminTab === 'schedule' ? 'bg-white text-[#FF5722] shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}>Schedule</button>
+              <button onClick={() => setAdminTab('broadcast')} className={`px-6 py-2.5 rounded-xl font-black text-xs uppercase tracking-widest transition-all ${adminTab === 'broadcast' ? 'bg-white text-[#FF5722] shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}>Broadcasts</button>
             </div>
 
             <div className="hidden md:flex items-center gap-3">
@@ -816,6 +863,106 @@ export default function AdminPage() {
         <main className="max-w-7xl mx-auto w-full p-4 md:p-6 mt-2 flex-grow">
 
           {/* ========================================== */}
+                  {/* TAB 4: BROADCAST CENTER & HISTORY          */}
+                  {/* ========================================== */}
+                  {adminTab === 'broadcast' && (
+                    <div className="max-w-3xl mx-auto animate-in fade-in space-y-10">
+                      {/* Centered Composer */}
+                      <div className="bg-[#111827] rounded-[3rem] p-8 md:p-12 shadow-2xl relative overflow-hidden text-center mt-4">
+                        <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/4 opacity-5 text-[15rem] pointer-events-none">📡</div>
+                        <h2 className="font-black text-3xl text-white uppercase tracking-widest mb-2 relative z-10">Command Center</h2>
+                        <p className="text-gray-400 text-[10px] font-bold uppercase tracking-widest mb-8 relative z-10">Send targeted push notifications instantly</p>
+                        <div className="space-y-4 relative z-10 text-left max-w-xl mx-auto">
+                          <input 
+                            type="text" 
+                            placeholder="Notification Title (e.g. Bus Leaving!)" 
+                            value={broadcastForm.title}
+                            onChange={(e) => setBroadcastForm({...broadcastForm, title: e.target.value})}
+                            className="w-full bg-gray-800/50 border border-gray-700 text-white rounded-xl p-4 font-bold outline-none focus:border-[#FF5722] placeholder-gray-500 text-center" 
+                          />
+                          <textarea 
+                            placeholder="Message content..." 
+                            value={broadcastForm.body}
+                            onChange={(e) => setBroadcastForm({...broadcastForm, body: e.target.value})}
+                            rows={3}
+                            className="w-full bg-gray-800/50 border border-gray-700 text-white rounded-xl p-4 font-bold outline-none focus:border-[#FF5722] placeholder-gray-500 resize-none text-center" 
+                          />
+                          <div className="flex gap-4">
+                            <select 
+                              value={broadcastForm.target}
+                              onChange={(e) => setBroadcastForm({...broadcastForm, target: e.target.value})}
+                              className="flex-1 bg-gray-800/50 border border-gray-700 text-white rounded-xl p-4 font-bold outline-none focus:border-[#FF5722] text-center"
+                            >
+                              <option value="all_students">All Students</option>
+                              <option value="year_1">Year 1 Only</option>
+                              <option value="year_2">Year 2 Only</option>
+                              <option value="year_3">Year 3 Only</option>
+                              <option value="year_4">Year 4 Only</option>
+                              <option value="coordinators">Coordinators Only</option>
+                            </select>
+                          </div>
+                          <button 
+                            onClick={handleSendBroadcast}
+                            disabled={isProcessing}
+                            className="w-full py-5 bg-[#FF5722] text-white font-black rounded-xl uppercase tracking-widest shadow-xl hover:bg-orange-600 transition active:scale-95 disabled:opacity-50 mt-4"
+                          >
+                            {isProcessing ? 'Transmitting...' : 'FIRE NOTIFICATION 🚀'}
+                          </button>
+                        </div>
+                      </div>
+                      {/* History Log */}
+                      <div>
+                        <h3 className="font-black text-gray-400 uppercase tracking-[0.2em] text-xs mb-6 text-center">Transmission History</h3>
+                        <div className="grid gap-3">
+                          {broadcastHistory.map((log) => (
+                            <div 
+                              key={log.id} 
+                              onClick={() => setSelectedBroadcast(log)}
+                              className="p-5 bg-white border border-gray-100 rounded-2xl shadow-sm hover:border-[#FF5722] hover:shadow-md transition-all cursor-pointer flex justify-between items-center group"
+                            >
+                              <div className="overflow-hidden pr-4">
+                                <h4 className="font-black text-gray-900 truncate">{log.title}</h4>
+                                <p className="text-[10px] font-bold text-gray-400 uppercase mt-1 tracking-widest truncate">{log.targetTopic.replace('_', ' ')}</p>
+                              </div>
+                              <div className="text-right shrink-0">
+                                <span className="text-[9px] font-black bg-orange-50 text-[#FF5722] px-3 py-1 rounded-lg uppercase tracking-widest inline-block mb-1">
+                                  Sent
+                                </span>
+                                <p className="text-[9px] font-bold text-gray-400">
+                                  {new Date(log.sentAt).toLocaleDateString()}
+                                </p>
+                              </div>
+                            </div>
+                          ))}
+                          {broadcastHistory.length === 0 && (
+                            <p className="text-center text-[10px] font-black text-gray-400 uppercase py-10">No broadcasts sent yet.</p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Broadcast Details Modal */}
+                  {selectedBroadcast && (
+                    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[200] p-4 backdrop-blur-sm" onClick={() => setSelectedBroadcast(null)}>
+                      <div className="w-full max-w-sm bg-white rounded-[2.5rem] p-8 shadow-2xl animate-in zoom-in-95 border-2 border-[#111827]" onClick={e => e.stopPropagation()}>
+                        <div className="flex justify-between items-start mb-6 pb-4 border-b border-gray-100">
+                          <div>
+                            <span className="text-[9px] font-black bg-gray-100 text-gray-600 px-3 py-1 rounded-md uppercase tracking-widest mb-2 inline-block">Target: {selectedBroadcast.targetTopic.replace('_', ' ')}</span>
+                            <h3 className="font-black text-xl text-gray-900 uppercase leading-tight mt-1">{selectedBroadcast.title}</h3>
+                          </div>
+                          <button onClick={() => setSelectedBroadcast(null)} className="text-gray-400 hover:text-red-500 font-black text-2xl transition-colors">&times;</button>
+                        </div>
+                        <div className="bg-[#FFF9F5] p-5 rounded-2xl border border-orange-100 mb-6">
+                          <p className="text-sm font-medium text-gray-800 leading-relaxed italic">"{selectedBroadcast.body}"</p>
+                        </div>
+                        <div className="flex justify-between items-center text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+                          <p>By: {selectedBroadcast.sentBy.split('@')[0]}</p>
+                          <p>{new Date(selectedBroadcast.sentAt).toLocaleString()}</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
           {/* TAB 1: OPERATIONS (Dashboard & Events) */}
           {/* ========================================== */}
           {adminTab === 'operations' && (
@@ -829,6 +976,57 @@ export default function AdminPage() {
               </div>
 
               <div className="grid lg:grid-cols-12 gap-8">
+                {/* 📡 THE BROADCAST CENTER */}
+                <div className="bg-[#111827] rounded-[2.5rem] p-6 md:p-8 shadow-2xl border border-gray-800 mb-6 animate-in slide-in-from-top-4 relative overflow-hidden">
+                  <div className="absolute top-0 right-0 p-8 opacity-10 pointer-events-none text-9xl">📡</div>
+                  <h2 className="font-black text-xl text-white uppercase tracking-widest mb-4">Broadcast Center</h2>
+                  <div className="flex flex-col md:flex-row gap-4 relative z-10">
+                    <div className="flex-grow space-y-4">
+                      <input 
+                        type="text" 
+                        placeholder="Title (e.g. Bus Leaving!)" 
+                        id="broadcastTitle"
+                        className="w-full bg-gray-800/50 border border-gray-700 text-white rounded-xl p-4 font-bold outline-none focus:border-[#FF5722] placeholder-gray-500" 
+                      />
+                      <textarea 
+                        placeholder="Message content..." 
+                        id="broadcastMessage"
+                        rows={2}
+                        className="w-full bg-gray-800/50 border border-gray-700 text-white rounded-xl p-4 font-bold outline-none focus:border-[#FF5722] placeholder-gray-500 resize-none" 
+                      />
+                    </div>
+                    <div className="flex flex-col gap-4 min-w-[200px]">
+                      <select id="broadcastTarget" className="bg-gray-800/50 border border-gray-700 text-white rounded-xl p-4 font-bold outline-none focus:border-[#FF5722]">
+                        <option value="all_students">All Students</option>
+                        <option value="year_1">Year 1 Only</option>
+                        <option value="year_2">Year 2 Only</option>
+                        <option value="year_3">Year 3 Only</option>
+                        <option value="year_4">Year 4 Only</option>
+                        <option value="coordinators">Coordinators Only</option>
+                      </select>
+                      <button 
+                        onClick={async () => {
+                          const title = (document.getElementById('broadcastTitle') as HTMLInputElement).value;
+                          const body = (document.getElementById('broadcastMessage') as HTMLTextAreaElement).value;
+                          const target = (document.getElementById('broadcastTarget') as HTMLSelectElement).value;
+                          if(!title || !body) return alert("Title and Message required!");
+                          const token = await auth.currentUser?.getIdToken();
+                          await fetch(`${API_URL}/admin/broadcast`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                            body: JSON.stringify({ targetTopic: target, title, body })
+                          });
+                          alert("Broadcast Sent! 🚀");
+                          (document.getElementById('broadcastTitle') as HTMLInputElement).value = '';
+                          (document.getElementById('broadcastMessage') as HTMLTextAreaElement).value = '';
+                        }}
+                        className="w-full h-full bg-[#FF5722] text-white font-black rounded-xl uppercase tracking-widest shadow-lg hover:bg-orange-600 transition active:scale-95"
+                      >
+                        Send Push
+                      </button>
+                    </div>
+                  </div>
+                </div>
                 {/* EVENTS COLUMN */}
                 <div className="lg:col-span-8 space-y-6">
                   <div className="p-4 rounded-2xl border border-[#FF5722]/30 flex flex-col md:flex-row gap-4 bg-[#FFF9F5] shadow-sm">
@@ -877,7 +1075,7 @@ export default function AdminPage() {
                     <div className="space-y-8 animate-in fade-in duration-300 bg-gray-50 p-6 rounded-3xl mb-6 border border-gray-100">
                       
                       {/* STAT CARDS */}
-                      <div className="grid grid-cols-3 gap-4">
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                         <div className="p-4 md:p-6 rounded-[2rem] bg-blue-50 text-center border border-blue-100 shadow-inner">
                            <p className="text-[9px] font-black text-blue-400 uppercase mb-1 tracking-widest">Boys</p>
                            <h4 className="text-3xl md:text-4xl font-black text-blue-600">{stats.gender['Male'] || 0}</h4>
@@ -886,16 +1084,20 @@ export default function AdminPage() {
                            <p className="text-[9px] font-black text-pink-400 uppercase mb-1 tracking-widest">Girls</p>
                            <h4 className="text-3xl md:text-4xl font-black text-pink-500">{stats.gender['Female'] || 0}</h4>
                         </div>
+                        <div className="p-4 md:p-6 rounded-[2rem] bg-gray-50 text-center border border-gray-200 shadow-sm">
+                           <p className="text-[9px] font-black text-gray-400 uppercase mb-1 tracking-widest">Unspecified</p>
+                           <h4 className="text-3xl md:text-4xl font-black text-gray-500">{stats.gender['Unspecified'] || 0}</h4>
+                        </div>
                         <div className="p-4 md:p-6 rounded-[2rem] bg-white text-center border border-gray-200 shadow-sm">
-                           <p className="text-[9px] font-black text-gray-400 uppercase mb-1 tracking-widest">Total</p>
+                           <p className="text-[9px] font-black text-[#FF5722] uppercase mb-1 tracking-widest">Total</p>
                            <h4 className="text-3xl md:text-4xl font-black text-gray-900">{attendees.length}</h4>
                         </div>
                       </div>
 
                       {/* BAR CHART */}
-                      <div className="p-6 rounded-[2.5rem] border border-gray-200 bg-white flex items-end justify-between h-48 px-4 md:px-10 gap-2 shadow-sm">
+                      <div className="p-6 rounded-[2.5rem] border border-gray-200 bg-white flex items-end justify-between h-48 px-4 md:px-10 gap-2 shadow-sm mt-4">
                         {[1, 2, 3, 4].map(y => {
-                          const yData = stats.years[y.toString()] || { Male: 0, Female: 0, total: 0 };
+                          const yData = stats.years[y.toString()] || { Male: 0, Female: 0, Unspecified: 0, total: 0 };
                           const maxArr = [1,2,3,4].map(yr => (stats.years[yr.toString()]?.total || 0));
                           const max = Math.max(...maxArr, 1);
                           const height = (yData.total / max) * 100;
@@ -904,6 +1106,7 @@ export default function AdminPage() {
                                <div className="w-8 md:w-16 bg-gray-50 rounded-t-xl overflow-hidden shadow-inner flex flex-col-reverse transition-all duration-500 border border-gray-100" style={{ height: `${Math.max(height, 5)}%` }}>
                                   <div className="w-full bg-blue-500 transition-all" style={{ height: `${yData.total > 0 ? (yData.Male / yData.total) * 100 : 0}%` }}></div>
                                   <div className="w-full bg-pink-500 transition-all" style={{ height: `${yData.total > 0 ? (yData.Female / yData.total) * 100 : 0}%` }}></div>
+                                  <div className="w-full bg-gray-300 transition-all" style={{ height: `${yData.total > 0 ? (yData.Unspecified / yData.total) * 100 : 0}%` }}></div>
                                </div>
                                <span className="text-[9px] font-black uppercase tracking-widest text-gray-400">Yr {y}</span>
                             </div>
@@ -1034,111 +1237,142 @@ export default function AdminPage() {
           )}
 
           {/* ========================================== */}
-          {/* TAB 2: ROSTER & CRM */}
+          {/* TAB 2: UNIFIED ROSTER & CRM */}
           {/* ========================================== */}
           {adminTab === 'roster' && (
             <div className="space-y-6 animate-in fade-in">
-              {/* HORIZONTAL 4-COLUMN GRID */}
-              <div className="grid md:grid-cols-2 xl:grid-cols-4 gap-6">
+              
+              {/* TOP ACTION BAR: Search & Filters */}
+              <div className="bg-white p-6 rounded-3xl shadow-sm border border-[#FF5722] flex flex-col md:flex-row gap-4 items-center justify-between sticky top-24 z-30">
+                <div className="flex w-full md:w-1/2 gap-2 relative">
+                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-lg">🔎</span>
+                  <input 
+                    type="text" 
+                    placeholder="Search VTU, Name, or Dept..." 
+                    value={vtuLookup} 
+                    onChange={(e) => setVtuLookup(e.target.value)} 
+                    className="w-full pl-12 pr-4 py-4 rounded-xl outline-none font-black text-sm bg-[#FFF9F5] border border-orange-100 focus:border-[#FF5722] transition-colors"
+                  />
+                </div>
                 
-                {/* STUDENT SEARCH (Multi-Result) */}
-                <div className="p-6 rounded-[2rem] border-2 border-[#FF5722] bg-[#FFF9F5] shadow-sm">
-                  <h2 className="font-black text-[10px] tracking-[0.2em] uppercase mb-4 text-[#FF5722] flex items-center gap-2"><span className="text-lg">🔎</span> Student Tracker</h2>
-                  <input type="text" placeholder="Search VTU or Name..." value={vtuLookup} onChange={(e) => setVtuLookup(e.target.value)} className="w-full p-4 mb-4 text-sm rounded-2xl outline-none font-black border border-[#FF5722]/30 bg-white shadow-inner focus:border-[#FF5722] transition-colors" />
-                  
-                  {/* Multi-result display */}
-                  <div className="space-y-2 max-h-[300px] overflow-y-auto custom-scrollbar">
-                    {vtuLookup.length >= 2 && (data.users || []).filter((u: any) => 
-                      String(u.vtuNumber).includes(vtuLookup) || 
-                      (u.name && u.name.toLowerCase().includes(vtuLookup.toLowerCase()))
-                    ).slice(0, 10).map((u: any) => (
-                      <div key={u.vtuNumber} onClick={() => setSelectedStudent({studentName: u.name, vtuNumber: u.vtuNumber, dept: u.dept, year: u.year, gender: u.gender, userData: u})} className="p-4 rounded-xl border border-white bg-white cursor-pointer hover:shadow-lg hover:border-[#FF5722] transition-all">
-                        <p className="font-black text-sm text-gray-900 truncate capitalize">{u.name}</p>
-                        <p className="text-[9px] font-bold text-gray-500 mt-1">{u.vtuNumber} • {u.dept} • Yr {u.year}</p>
-                      </div>
-                    ))}
-                    {vtuLookup.length >= 2 && (data.users || []).filter((u: any) => 
-                      String(u.vtuNumber).includes(vtuLookup) || 
-                      (u.name && u.name.toLowerCase().includes(vtuLookup.toLowerCase()))
-                    ).length === 0 && (
-                      <p className="text-center text-xs text-gray-400 py-6 font-black uppercase">No matches found</p>
-                    )}
-                  </div>
-                </div>
-
-                {/* CRM: CLUB MANAGEMENT */}
-                <div className="p-6 rounded-[2rem] border-2 border-blue-500 bg-white shadow-sm">
-                  <h2 className="font-black mb-4 uppercase text-[10px] tracking-[0.2em] text-blue-600 flex items-center gap-2"><span className="text-lg">👥</span> Club CRM</h2>
-                  
-                  <div className="flex gap-2 mb-4 bg-gray-50 p-1 rounded-xl">
-                    <button onClick={() => setCrmTab('members')} className={`flex-1 py-2 rounded-lg font-black text-[9px] uppercase tracking-widest transition ${crmTab === 'members' ? 'bg-blue-600 text-white shadow-md' : 'text-gray-500'}`}>Members</button>
-                    <button onClick={() => setCrmTab('guests')} className={`flex-1 py-2 rounded-lg font-black text-[9px] uppercase tracking-widest transition ${crmTab === 'guests' ? 'bg-purple-600 text-white shadow-md' : 'text-gray-500'}`}>Guests</button>
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-2 mb-4">
-                    <select value={crmFilters.year} onChange={e => setCrmFilters({...crmFilters, year: e.target.value})} className="p-2 bg-gray-50 border border-gray-100 rounded-lg font-bold text-[10px] outline-none">
-                      <option value="All">All Yrs</option><option value="1">Yr 1</option><option value="2">Yr 2</option><option value="3">Yr 3</option><option value="4">Yr 4</option>
-                    </select>
-                    <select value={crmFilters.gender} onChange={e => setCrmFilters({...crmFilters, gender: e.target.value})} className="p-2 bg-gray-50 border border-gray-100 rounded-lg font-bold text-[10px] outline-none">
-                      <option value="All">All</option><option value="Male">M</option><option value="Female">F</option>
-                    </select>
-                    <input type="number" min="0" placeholder="Min" value={crmFilters.minEvents} onChange={e => setCrmFilters({...crmFilters, minEvents: parseInt(e.target.value) || 0})} className="p-2 bg-gray-50 border border-gray-100 rounded-lg font-bold text-[10px] outline-none w-full" />
-                  </div>
-
-                  <div className="space-y-2 max-h-[250px] overflow-y-auto custom-scrollbar">
-                    {crmUsers.slice(0, 8).map((u: any) => (
-                      <div key={u.vtuNumber} className="flex justify-between items-center p-3 border border-gray-100 rounded-xl hover:border-blue-300 transition group">
-                        <div className="truncate flex-1">
-                          <p className="font-bold text-xs text-gray-900 capitalize truncate">{u.name || 'Unknown'}</p>
-                          <p className="text-[9px] text-gray-500">{u.vtuNumber}</p>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-[9px] font-black text-blue-600 bg-blue-50 px-2 py-1 rounded">{u.eventsAttended}</span>
-                          {crmTab === 'members' ? (
-                            <button onClick={() => executeCrmAction('/admin/crm/demote', { vtu: u.vtuNumber }, "Demoted")} className="text-[8px] text-red-500 font-black opacity-0 group-hover:opacity-100">↓</button>
-                          ) : (
-                            <button onClick={() => executeCrmAction('/admin/crm/promote', { vtu: u.vtuNumber }, "Promoted")} className="text-[8px] text-green-500 font-black opacity-0 group-hover:opacity-100">↑</button>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                    {crmUsers.length === 0 && <p className="text-center text-[10px] font-black text-gray-400 uppercase py-6">No users</p>}
-                  </div>
-                </div>
-
-                {/* ROSTER MANAGEMENT */}
-                <div className="p-6 rounded-[2rem] border-2 border-gray-100 bg-white shadow-sm">
-                  <h2 className="font-black mb-4 uppercase text-[10px] tracking-[0.2em] text-gray-400 flex items-center gap-2"><span className="text-lg">🗄️</span> Master Roster</h2>
-                  
-                  <button onClick={() => setShowExportModal(true)} className="w-full mb-4 bg-gradient-to-r from-green-500 to-green-600 text-white font-black py-3 rounded-xl uppercase tracking-widest text-[9px] shadow-lg hover:shadow-xl transition-all flex items-center justify-center gap-2">
-                    <span>📊</span> Dean's Report
+                <div className="flex w-full md:w-auto gap-2 overflow-x-auto no-scrollbar">
+                  <select value={crmFilters.year} onChange={e => setCrmFilters({...crmFilters, year: e.target.value})} className="px-4 py-4 bg-gray-50 border border-gray-100 rounded-xl font-bold text-xs outline-none">
+                    <option value="All">All Years</option><option value="1">Year 1</option><option value="2">Year 2</option><option value="3">Year 3</option><option value="4">Year 4</option>
+                  </select>
+                  <select value={crmTab} onChange={e => setCrmTab(e.target.value as any)} className="px-4 py-4 bg-gray-50 border border-gray-100 rounded-xl font-bold text-xs outline-none">
+                    <option value="members">Official Members</option><option value="guests">Guests / Walk-ins</option>
+                  </select>
+                  <button onClick={() => setShowExportModal(true)} className="px-6 py-4 bg-gradient-to-r from-green-500 to-green-600 text-white font-black rounded-xl uppercase tracking-widest text-[10px] shadow-md hover:shadow-lg transition-all whitespace-nowrap">
+                    📊 Export CSV
                   </button>
-                  
-                  <div className="relative w-full border-2 border-dashed border-blue-200 bg-blue-50 rounded-xl p-4 text-center hover:bg-blue-100 transition cursor-pointer mb-4">
-                    <p className="text-[9px] font-black text-blue-600 uppercase tracking-widest">{isUploading ? "Processing..." : "+ Upload CSV"}</p>
-                    <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept=".csv" className="absolute inset-0 opacity-0 cursor-pointer" />
+                </div>
+              </div>
+
+              {/* ADMIN TOOLS ROW */}
+              <div className="grid md:grid-cols-2 gap-4">
+                <div className="bg-blue-50 border-2 border-dashed border-blue-200 rounded-2xl p-4 flex items-center justify-between hover:bg-blue-100 transition relative cursor-pointer">
+                  <div>
+                    <p className="text-[10px] font-black text-blue-600 uppercase tracking-widest">Bulk Upload Roster</p>
+                    <p className="text-[9px] font-bold text-blue-400 mt-1">Upload .csv file with headers: VTU, NAME</p>
                   </div>
-                  
-                  <div className="flex gap-2">
-                    <select value={selectedPurgeYear} onChange={(e) => setSelectedPurgeYear(e.target.value)} className="px-3 py-2 text-[10px] rounded-lg font-black border border-gray-200 bg-gray-50 outline-none">
+                  <span className="text-xl">📁</span>
+                  <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept=".csv" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
+                </div>
+                
+                <div className="bg-red-50 border border-red-100 rounded-2xl p-4 flex items-center justify-between">
+                  <div>
+                    <p className="text-[10px] font-black text-red-600 uppercase tracking-widest">Yearly Purge</p>
+                    <select value={selectedPurgeYear} onChange={(e) => setSelectedPurgeYear(e.target.value)} className="mt-1 px-2 py-1 text-[9px] rounded-md font-bold bg-white border border-red-200 outline-none mr-2 text-red-500">
                       <option value="1">Yr 1</option><option value="2">Yr 2</option><option value="3">Yr 3</option><option value="4">Yr 4</option>
                     </select>
-                    <button onClick={handleYearPurge} className="flex-1 bg-white border border-red-100 text-red-500 font-black rounded-lg text-[9px] uppercase tracking-widest hover:bg-red-500 hover:text-white transition-colors">Purge</button>
                   </div>
+                  <button onClick={handleYearPurge} disabled={isPurging} className="px-4 py-2 bg-red-600 text-white rounded-lg font-black text-[9px] uppercase tracking-widest hover:bg-red-700 transition">
+                    {isPurging ? 'Purging...' : 'Delete Data'}
+                  </button>
                 </div>
-
-                {/* SOS RECOVERY */}
-                <div className="p-6 rounded-[2rem] border-2 border-red-200 bg-red-50 shadow-sm">
-                  <h2 className="font-black mb-4 uppercase text-[10px] tracking-[0.2em] text-red-500 flex items-center gap-2"><span className="text-lg">🚨</span> Emergency</h2>
-                  
-                  <div className="relative w-full border-2 border-dashed border-red-300 bg-white rounded-xl p-6 text-center hover:bg-red-50 transition cursor-pointer">
-                    <p className="text-[10px] font-black text-red-600 uppercase tracking-widest">{isRestoringBackup ? 'Restoring...' : '📤 SOS Restore'}</p>
-                    <p className="text-[8px] font-bold text-red-400 mt-2 uppercase">Upload .txt backup</p>
-                    <input type="file" ref={sosFileInputRef} onChange={handleSOSFileUpload} accept=".txt" className="absolute inset-0 opacity-0 cursor-pointer" />
-                  </div>
-                </div>
-
               </div>
+
+              {/* UNIFIED DATA TABLE */}
+              <div className="bg-white rounded-3xl border border-gray-200 shadow-sm overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="bg-gray-50 border-b-2 border-gray-100 text-[9px] uppercase tracking-widest text-gray-500">
+                        <th className="p-4 font-black">Student Details</th>
+                        <th className="p-4 font-black text-center">Attendance</th>
+                        <th className="p-4 font-black">Device Lock</th>
+                        <th className="p-4 font-black text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50">
+                      {crmUsers
+                        .filter((u: any) => {
+                           const search = vtuLookup.toLowerCase();
+                           return String(u.vtuNumber).toLowerCase().includes(search) || 
+                                  (u.name || '').toLowerCase().includes(search) || 
+                                  (u.dept || '').toLowerCase().includes(search);
+                        })
+                        .map((u: any) => (
+                        <tr key={u.vtuNumber} className="hover:bg-[#FFF9F5] transition-colors group">
+                          <td className="p-4 cursor-pointer" onClick={() => setSelectedStudent({studentName: u.name, vtuNumber: u.vtuNumber, dept: u.dept, year: u.year, gender: u.gender, userData: u})}>
+                            <p className="font-black text-sm text-gray-900 capitalize group-hover:text-[#FF5722] transition-colors">{u.name || 'Unknown'}</p>
+                            <p className="text-[10px] font-mono font-bold text-gray-500 mt-1">{u.vtuNumber} • {u.dept || 'N/A'} • Yr {u.year || 'N/A'}</p>
+                          </td>
+                          <td className="p-4 text-center">
+                            <span className="inline-block px-3 py-1 bg-orange-50 text-[#FF5722] font-black text-sm rounded-lg border border-orange-100">
+                              {u.eventsAttended}
+                            </span>
+                          </td>
+                          <td className="p-4">
+                            {u.registeredDeviceId ? (
+                              <span className="px-2 py-1 bg-gray-100 text-gray-600 rounded text-[9px] font-mono font-bold flex items-center gap-1 w-max">
+                                🔒 Locked
+                              </span>
+                            ) : (
+                              <span className="px-2 py-1 bg-red-50 text-red-500 rounded text-[9px] font-black flex items-center gap-1 w-max animate-pulse">
+                                🔓 Unset
+                              </span>
+                            )}
+                          </td>
+                          <td className="p-4 text-right">
+                            {crmTab === 'guests' ? (
+                              <button 
+                                onClick={() => executeCrmAction('/admin/crm/promote', { vtu: u.vtuNumber }, "Promoted to Master Roster!")}
+                                className="bg-[#111827] text-white px-4 py-2 rounded-xl font-black text-[9px] uppercase tracking-widest hover:bg-green-600 transition-colors shadow-sm"
+                              >
+                                Promote to Member
+                              </button>
+                            ) : (
+                              <div className="flex justify-end gap-2">
+                                {u.registeredDeviceId && (
+                                  <button onClick={() => handleResetDevice(u.email || u.vtuNumber)} className="bg-gray-100 text-gray-600 px-3 py-2 rounded-xl font-black text-[9px] uppercase tracking-widest hover:bg-gray-200 transition-colors" title="Reset Device Binding">
+                                    Reset Phone
+                                  </button>
+                                )}
+                                <button 
+                                  onClick={() => executeCrmAction('/admin/crm/demote', { vtu: u.vtuNumber }, "Demoted to Guest")}
+                                  className="bg-red-50 text-red-500 px-3 py-2 rounded-xl font-black text-[9px] uppercase tracking-widest hover:bg-red-500 hover:text-white transition-colors"
+                                >
+                                  Demote
+                                </button>
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                      
+                      {crmUsers.length === 0 && (
+                        <tr>
+                          <td colSpan={4} className="p-10 text-center text-gray-400 font-black uppercase text-xs tracking-widest">
+                            No students found in this category
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
             </div>
           )}
 

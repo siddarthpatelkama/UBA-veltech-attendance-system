@@ -1,4 +1,4 @@
-'use client';
+"use client";
 
 import { useEffect, useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
@@ -18,6 +18,23 @@ export default function HomePage() {
   const [userData, setUserData] = useState<any>(null);
   const [history, setHistory] = useState<any[]>([]);
   const [leaderboard, setLeaderboard] = useState<any[]>([]);
+    // --- PREMIUM LOADING UX STATES ---
+    const loadingMessages = [
+      "Connecting to UBA Servers...",
+      "Waking up the database and servers from sleep...",
+      "This may take up to a minute...",
+      "Fetching secure credentials...",
+      "Almost there..."
+    ];
+    const [loadingMsgIndex, setLoadingMsgIndex] = useState(0);
+
+    useEffect(() => {
+      if (!loading) return;
+      const interval = setInterval(() => {
+        setLoadingMsgIndex((prev) => (prev + 1) % loadingMessages.length);
+      }, 5000); // Changes text every 5 seconds
+      return () => clearInterval(interval);
+    }, [loading]);
   
   // --- UI NAVIGATION & MODAL STATES ---
   const [activeView, setActiveView] = useState<'home' | 'history' | 'rankings' | 'excuses'>('home');
@@ -175,6 +192,22 @@ export default function HomePage() {
       setLeaderboard(historyData.leaderboard || []);
       
       localStorage.setItem('uba_student_profile', JSON.stringify(combinedUserData));
+            // 🚀 ONESIGNAL INIT & TAGGING
+            if (typeof window !== 'undefined' && (window as any).Capacitor?.isNativePlatform()) {
+              try {
+                const OneSignal = (window as any).plugins?.OneSignal;
+                if (OneSignal) {
+                  OneSignal.initialize("19e04964-ec0f-44c4-a1df-e56989f568f8"); 
+                  OneSignal.Notifications.requestPermission(true);
+                  // Tag the phone so the backend knows who to send messages to
+                  OneSignal.User.addTag("vtu", combinedUserData.vtuNumber);
+                  OneSignal.User.addTag("role", combinedUserData.role || "student");
+                  OneSignal.User.addTag("year", combinedUserData.year || "1");
+                }
+              } catch (err) {
+                console.log("OneSignal Init skipped (Not running in Native APK)");
+              }
+            }
       localStorage.setItem('uba_student_history', JSON.stringify(historyData.history || []));
       localStorage.setItem('uba_student_leaderboard', JSON.stringify(historyData.leaderboard || []));
 
@@ -355,9 +388,56 @@ export default function HomePage() {
   };
 
   if (loading) return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-white">
-      <div className="w-12 h-12 border-4 border-orange-100 border-t-[#FF5722] rounded-full animate-spin mb-4"></div>
-      <p className="text-[10px] font-black uppercase tracking-widest text-[#FF5722] animate-pulse">Entering Portal</p>
+    <div className="min-h-screen bg-white font-sans text-gray-900 flex flex-col relative overflow-hidden">
+      {/* SKELETON NAVBAR */}
+      <nav className="p-6 bg-white border-b-2 border-gray-50 flex justify-between items-center sticky top-0">
+        <div className="flex items-center gap-3">
+          <div className="h-10 w-10 bg-gray-100 rounded-full animate-pulse"></div>
+          <div className="h-6 w-32 bg-gray-100 rounded-md animate-pulse"></div>
+        </div>
+        <div className="h-8 w-24 bg-gray-100 rounded-md animate-pulse hidden md:block"></div>
+      </nav>
+
+      {/* SKELETON MAIN CONTENT */}
+      <main className="max-w-6xl mx-auto p-6 md:p-10 flex-grow w-full">
+        <div className="grid lg:grid-cols-12 gap-10">
+          {/* Profile Card Skeleton */}
+          <div className="lg:col-span-4 space-y-8">
+            <div className="p-8 rounded-[3rem] bg-gray-50 shadow-sm border border-gray-100 h-[250px] animate-pulse flex flex-col justify-between">
+              <div>
+                <div className="h-3 w-24 bg-gray-200 rounded mb-6"></div>
+                <div className="h-8 w-48 bg-gray-200 rounded"></div>
+              </div>
+              <div className="flex justify-between items-end border-t border-gray-200 pt-6">
+                <div>
+                  <div className="h-2 w-16 bg-gray-200 rounded mb-2"></div>
+                  <div className="h-8 w-12 bg-gray-200 rounded"></div>
+                </div>
+                <div className="h-6 w-16 bg-gray-200 rounded"></div>
+              </div>
+            </div>
+          </div>
+          {/* Digital ID Skeleton */}
+          <div className="lg:col-span-8 space-y-10">
+            <div className="p-10 rounded-[4rem] bg-gray-50 border border-gray-100 text-center shadow-sm animate-pulse flex flex-col items-center">
+              <div className="h-8 w-40 bg-gray-200 rounded mb-4"></div>
+              <div className="h-3 w-56 bg-gray-200 rounded mb-8"></div>
+              <div className="h-64 w-64 bg-gray-200 rounded-[3rem] mb-8"></div>
+              <div className="grid grid-cols-2 gap-4 w-full max-w-sm">
+                <div className="h-16 bg-gray-200 rounded-2xl"></div>
+                <div className="h-16 bg-gray-200 rounded-2xl"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+      {/* DYNAMIC LOADING TEXT OVERLAY */}
+      <div className="absolute bottom-10 left-1/2 -translate-x-1/2 bg-[#111827] text-white px-6 py-4 rounded-2xl shadow-2xl z-50 flex items-center gap-4 animate-in slide-in-from-bottom-10 min-w-[280px] justify-center">
+        <div className="w-5 h-5 border-2 border-white/20 border-t-[#FF5722] rounded-full animate-spin shrink-0"></div>
+        <p className="text-[10px] font-black uppercase tracking-widest transition-opacity duration-300">
+          {loadingMessages[loadingMsgIndex]}
+        </p>
+      </div>
     </div>
   );
 
@@ -408,7 +488,7 @@ export default function HomePage() {
   );
 
   // VIP BOUNCER CHECK: Compare current phone against the locked database phone
-  const isDeviceAuthorized = !userData?.registeredDeviceId || userData?.currentDeviceId === userData?.registeredDeviceId;
+  const isDeviceAuthorized = !userData?.registeredDeviceId || deviceId === userData?.registeredDeviceId;
 
   return (
     <div className="min-h-screen bg-white font-sans text-gray-900 flex flex-col">

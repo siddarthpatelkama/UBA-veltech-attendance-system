@@ -1,5 +1,4 @@
-'use client';
-
+"use client";
 import { useEffect, useState, useRef, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
@@ -24,6 +23,23 @@ export default function CoordinatorPage() {
   const router = useRouter();
   
   const [initialLoad, setInitialLoad] = useState(true); 
+
+  // --- OFFLINE BOOT INJECTION ---
+  const [networkLocked, setNetworkLocked] = useState(false);
+  
+  useEffect(() => {
+    // 1. INSTANT BOOT: If the phone is entirely offline, kill the loading spinner immediately
+    if (!navigator.onLine) {
+      setNetworkLocked(true);
+      setIsOfflineMode(true); // Force Vault Mode
+      setInitialLoad(false);  // Kill the spinner so UI paints instantly
+      
+      // Load whatever we have in the cache to populate the screen
+      const cachedUsers = localStorage.getItem('uba_users_cache');
+      if (cachedUsers) setUsers(JSON.parse(cachedUsers));
+    }
+  }, []);
+
   const [meetings, setMeetings] = useState<any[]>([]);
   const [attendance, setAttendance] = useState<any[]>([]);
   const [suspiciousLogs, setSuspiciousLogs] = useState<any[]>([]);
@@ -96,6 +112,23 @@ export default function CoordinatorPage() {
         const data = await res.json();
         setMyProfile(data);
         if (!data || !data.name) setShowNamePrompt(true);
+
+        // 🚀 ONESIGNAL INIT FOR COORDINATORS
+        if (typeof window !== 'undefined' && (window as any).Capacitor?.isNativePlatform()) {
+          try {
+            const OneSignal = (window as any).plugins?.OneSignal;
+            if (OneSignal) {
+              OneSignal.initialize("19e04964-ec0f-44c4-a1df-e56989f568f8"); 
+              OneSignal.Notifications.requestPermission(true);
+              // Tag them as a Coordinator!
+              const vtuExtract = data.vtuNumber || auth.currentUser?.email?.split('@')[0].toUpperCase();
+              OneSignal.User.addTag("vtu", vtuExtract);
+              OneSignal.User.addTag("role", data.role || "coordinator");
+            }
+          } catch (err) {
+            console.log("OneSignal Init skipped (Not running in Native APK)");
+          }
+        }
       }
     } catch (e) {}
   };
@@ -192,10 +225,15 @@ export default function CoordinatorPage() {
   };
 
   useEffect(() => {
-    const unsub = auth.onAuthStateChanged((user) => { 
-      if (user) fetchData(); 
-      else router.push('/login'); 
-    });
+    // 2. THE AUTH BYPASS: If we are hard-offline, skip Firebase Auth entirely.
+    let unsub = () => {};
+    
+    if (!networkLocked) {
+      unsub = auth.onAuthStateChanged((user) => { 
+        if (user) fetchData(); 
+        else router.push('/login'); 
+      });
+    }
 
     const saved = localStorage.getItem('uba_offline_vault');
     if (saved) setLocalOfflineScans(JSON.parse(saved));
@@ -213,7 +251,7 @@ export default function CoordinatorPage() {
     }
 
     return () => unsub();
-  }, []);
+  }, [networkLocked]);
 
   useEffect(() => {
     const autoSyncVault = async () => {
@@ -825,7 +863,7 @@ export default function CoordinatorPage() {
   const tabManual = (phaseAttendees || []).filter(a => a.isOverride);
   const tabSuspicious = (suspiciousLogs || []).filter(s => s.meetingId === displayId && (!activePhase || s.phaseId === activePhase.id));
 
-  if (initialLoad) return (
+  if (initialLoad && !networkLocked) return (
     <div className="h-screen flex items-center justify-center bg-white">
       <div className="animate-spin rounded-full h-10 w-10 border-t-4 border-[#FF5722]"></div>
     </div>

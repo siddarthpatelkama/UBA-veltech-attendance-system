@@ -1,4 +1,9 @@
 const admin = require("../firebaseAdmin");
+// --- THE RAM CACHE SHIELD ---
+if (!global.ubaCache) {
+  global.ubaCache = { meetings: [], attendance: [], suspiciousLogs: [], users: [], lastUpdated: 0 };
+}
+const CACHE_DURATION = 15 * 60 * 1000; // 15 Minutes
 const db = require("../config/firebase");
 const fcm = require('../utils/fcm'); // FCM Notification Engine
 
@@ -42,10 +47,10 @@ exports.createMeeting = async (req, res) => {
     };
 
     const meetingRef = await db.collection("meetings").add(meetingData);
+    if (global.ubaCache) global.ubaCache.lastUpdated = 0; // Spill bucket
     return res.status(201).json({ success: true, meetingId: meetingRef.id, title: title });
   } catch (error) {
     console.error("Create Meeting Error:", error);
-    return res.status(500).json({ success: false, message: "Server error" });
   }
 };
 
@@ -117,6 +122,7 @@ exports.updateManifest = async (req, res) => {
       await meetingRef.update({ manifest: newManifest });
     }
     
+    if (global.ubaCache) global.ubaCache.lastUpdated = 0;
     return res.json({ success: true });
   } catch (error) { return res.status(500).json({ success: false }); }
 };
@@ -145,7 +151,7 @@ exports.createPhase = async (req, res) => {
     });
     
     // --- FCM Trigger 2: Phase Live Broadcast ---
-    await fcm.sendNotification(
+      await onesignal.sendNotification(
       `meeting_${meetingId}`, // Subscribers to this specific event
       `🔴 SESSION LIVE`,
       `${phaseTitle} has started! Open your app to scan the QR code.`,
@@ -153,6 +159,7 @@ exports.createPhase = async (req, res) => {
     );
     // ---------------------------------------------
 
+    if (global.ubaCache) global.ubaCache.lastUpdated = 0;
     return res.json({ success: true });
   } catch (error) { return res.status(500).json({ success: false }); }
 };
@@ -165,6 +172,7 @@ exports.closePhase = async (req, res) => {
     const updatedPhases = (doc.data().phases || []).map(p => ({ ...p, status: 'closed' }));
     
     await meetingRef.update({ phases: updatedPhases, attendanceActive: false });
+    if (global.ubaCache) global.ubaCache.lastUpdated = 0;
     return res.json({ success: true });
   } catch (error) { return res.status(500).json({ success: false }); }
 };
@@ -172,14 +180,27 @@ exports.closePhase = async (req, res) => {
 // --- GLOBAL SESSION FETCHING ---
 exports.getMeetings = async (req, res) => {
   try {
-    const snapshot = await db.collection("meetings")
-      .orderBy("createdAt", "desc")
-      .limit(30) 
-      .get();
-      
+    const now = Date.now();
+    const skipRoster = req.query.skipRoster === 'true';
+
+    // 1. 🛡️ CHECK THE BUCKET FIRST (0 BLAZING FAST READS)
+    if (global.ubaCache.lastUpdated > 0 && (now - global.ubaCache.lastUpdated < CACHE_DURATION)) {
+       console.log("⚡ Serving Dashboard from RAM Cache (0 Firebase Reads!)");
+       return res.json({
+         success: true,
+         meetings: global.ubaCache.meetings,
+         attendance: global.ubaCache.attendance,
+         suspiciousLogs: global.ubaCache.suspiciousLogs,
+         users: skipRoster ? [] : global.ubaCache.users
+       });
+    }
+
+    console.log("🐢 Cache Empty or Expired. Hitting Firebase (This should only happen once every 15 mins)...");
+
+    // 2. FETCH FROM FIREBASE (Your original logic)
+    const snapshot = await db.collection("meetings").orderBy("createdAt", "desc").limit(30).get();
     const meetings = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
-    // QUOTA-FRIENDLY: Only fetch attendance for active meetings
     const activeMeetings = meetings.filter(m => m.status === 'active').map(m => m.id);
     let attendanceDocs = [];
     if (activeMeetings.length > 0) {
@@ -189,11 +210,9 @@ exports.getMeetings = async (req, res) => {
     }
 
     const suspSnap = await db.collection("suspiciousLogs").get();
+    const suspiciousLogs = suspSnap.docs.map(doc => doc.data());
 
-    // ROSTER SKIP LOGIC: Skip heavy identity fetches if client doesn't need them
-    const skipRoster = req.query.skipRoster === 'true';
     let mergedUsers = [];
-
     if (!skipRoster) {
       const [usersSnap, masterSnap, tempSnap] = await Promise.all([
         db.collection("users").get(),
@@ -202,43 +221,42 @@ exports.getMeetings = async (req, res) => {
       ]);
 
       const mergedIdentitiesMap = new Map();
-
       masterSnap.docs.forEach(doc => {
         const data = doc.data();
-        const vtuNumber = data.vtuNumber || doc.id;
-        mergedIdentitiesMap.set(vtuNumber, { ...data, vtuNumber });
+        mergedIdentitiesMap.set(data.vtuNumber || doc.id, { ...data, vtuNumber: data.vtuNumber || doc.id });
       });
-
       tempSnap.docs.forEach(doc => {
         const data = doc.data();
-        const vtuNumber = data.vtuNumber || doc.id;
-        if (!mergedIdentitiesMap.has(vtuNumber)) {
-          mergedIdentitiesMap.set(vtuNumber, { ...data, vtuNumber });
-        }
+        if (!mergedIdentitiesMap.has(data.vtuNumber || doc.id)) mergedIdentitiesMap.set(data.vtuNumber || doc.id, { ...data, vtuNumber: data.vtuNumber || doc.id });
       });
-
       usersSnap.docs.forEach(doc => {
         const data = doc.data();
-        const vtuNumber = data.vtuNumber || (data.email ? data.email.split('@')[0].replace(/\D/g, '') : undefined);
-        if (vtuNumber && !mergedIdentitiesMap.has(vtuNumber)) {
-          mergedIdentitiesMap.set(vtuNumber, { ...data, vtuNumber });
-        }
+        const vtu = data.vtuNumber || (data.email ? data.email.split('@')[0].replace(/\D/g, '') : undefined);
+        if (vtu && !mergedIdentitiesMap.has(vtu)) mergedIdentitiesMap.set(vtu, { ...data, vtuNumber: vtu });
       });
-
       mergedUsers = Array.from(mergedIdentitiesMap.values());
     }
+
+    // 3. 🪣 FILL THE BUCKET FOR THE NEXT PERSON
+    global.ubaCache.meetings = meetings;
+    global.ubaCache.attendance = attendanceDocs;
+    global.ubaCache.suspiciousLogs = suspiciousLogs;
+    if (!skipRoster) {
+       global.ubaCache.users = mergedUsers;
+    }
+    global.ubaCache.lastUpdated = now;
 
     return res.json({ 
       success: true, 
       meetings, 
       attendance: attendanceDocs, 
-      suspiciousLogs: suspSnap.docs.map(doc => doc.data()), 
-      users: mergedUsers
+      suspiciousLogs, 
+      users: skipRoster ? [] : global.ubaCache.users
     });
   } catch (error) {
     return res.status(500).json({ success: false, message: "Error fetching sessions" });
   }
-};
+  };
 
 // --- SEVERED-CONNECTION SYNC (with Emergency Routing) ---
 exports.syncOfflineAttendance = async (req, res) => {
@@ -381,7 +399,7 @@ exports.closeAttendance = async (req, res) => {
             batch.delete(masterRef); // Remove from Club
 
             // --- FCM Trigger 3A: Account Demotion Alert ---
-            await fcm.sendNotification(
+              await onesignal.sendNotification(
               `student_${student.vtu}`, // Targeted specifically to this student
               `🚨 UBA Account Demoted`,
               `You have missed 3 events. You have been removed from the Master Roster.`,
@@ -393,7 +411,7 @@ exports.closeAttendance = async (req, res) => {
             batch.update(masterRef, { strikes: currentStrikes });
 
             // --- FCM Trigger 3B: Strike Warning Alert ---
-            await fcm.sendNotification(
+              await onesignal.sendNotification(
               `student_${student.vtu}`,
               `⚠️ Strike Added (${currentStrikes}/3)`,
               `You missed ${meetingData.title}. Submit an excuse with GPS immediately to avoid demotion.`,
@@ -412,7 +430,7 @@ exports.closeAttendance = async (req, res) => {
         const attendanceSnap2 = await db.collection("attendance").where("meetingId", "==", meetingId).get();
         const attendedCount = attendanceSnap2.size;
         const missingCount = (meetingData.manifest || []).length - attendedCount;
-        await fcm.sendNotification(
+        await onesignal.sendNotification(
           'admin',
           `📊 Trip Closed: ${meetingData.title}`,
           `${attendedCount} Verified. ${missingCount} Missing. Strikes applied.`,

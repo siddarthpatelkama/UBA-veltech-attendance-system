@@ -5,6 +5,7 @@ require("dotenv").config();
 console.log("[SERVER] Initializing UBA Backend...");
 
 const attendanceRoutes = require("./routes/attendanceRoutes");
+const adminRoutes = require("./routes/adminRoutes");
 
 const app = express();
 
@@ -25,6 +26,12 @@ app.use((req, res, next) => {
 
 // MOUNTING ROUTES TO ROOT
 app.use("/", attendanceRoutes);
+app.use("/admin", adminRoutes);
+
+// --- THE 24/7 KEEP-ALIVE PING ---
+app.get('/keep-alive', (req, res) => {
+  res.status(200).send("UBA Server is awake and RAM cache is active.");
+});
 
 const http = require('http');
 const PORT = process.env.PORT || 5000;

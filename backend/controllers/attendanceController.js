@@ -105,6 +105,20 @@ exports.markAttendance = async (req, res) => {
       dateString: new Date().toLocaleString(),
       phaseId: phaseId || 'none'
     });
+    // 🚀 AUTO-UPDATE THE RAM CACHE IN REAL TIME (0 READS)
+    if (global.ubaCache && global.ubaCache.lastUpdated > 0) {
+       global.ubaCache.attendance.push({
+         meetingId,
+         vtuNumber: studentVtu,
+         studentName: studentData.name || req.user.name,
+         dept: studentData.dept || 'N/A',
+         year: studentData.year || 'N/A',
+         isGuest: isGuest,
+         deviceId: safeDeviceId,
+         timestamp: Date.now(), // Use local time for the cache
+         phaseId: phaseId || 'none'
+       });
+    }
 
     return res.json({ success: true, message: "Attendance Verified Successfully! 🧡" });
 

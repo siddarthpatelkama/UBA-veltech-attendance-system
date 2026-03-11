@@ -1,3 +1,41 @@
+// --- ADMIN BROADCAST CENTER & HISTORY ---
+const onesignal = require('../utils/onesignal');
+
+exports.sendBroadcast = async (req, res) => {
+  if (req.user.role !== "head") return res.status(403).json({ success: false, message: "Forbidden. Admin access required." });
+  try {
+    const { targetTopic, title, body } = req.body;
+    if (!title || !body) return res.status(400).json({ success: false, message: "Title and Body are required." });
+
+    // 1. Fire the push notification via OneSignal
+    await onesignal.sendNotification(targetTopic || 'all_students', title, body, { type: 'admin_broadcast' });
+
+    // 2. Save a permanent record to the Database History
+    await db.collection("broadcast_history").add({
+      title: title,
+      body: body,
+      targetTopic: targetTopic || 'all_students',
+      sentBy: req.user.email,
+      sentAt: Date.now()
+    });
+
+    return res.json({ success: true, message: "Broadcast sent successfully!" });
+  } catch (error) {
+    console.error("Broadcast Error:", error);
+    return res.status(500).json({ success: false, message: "Failed to send broadcast." });
+  }
+};
+
+exports.getBroadcastHistory = async (req, res) => {
+  if (req.user.role !== "head") return res.status(403).json({ success: false, message: "Forbidden." });
+  try {
+    const snap = await db.collection("broadcast_history").orderBy("sentAt", "desc").limit(30).get();
+    const history = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    res.json({ success: true, history });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Failed to fetch history." });
+  }
+};
 const admin = require("../firebaseAdmin");
 const db = require("../config/firebase");
 
