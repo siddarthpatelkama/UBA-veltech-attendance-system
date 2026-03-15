@@ -742,7 +742,7 @@ export default function AdminPage() {
   }) : null;
   const searchedUserAttendance = searchedUser ? data.attendance?.filter((a:any) => a.vtuNumber === searchedUser.vtuNumber) : [];
 
-  // FIXED: Removed networkLocked which doesn't exist here
+  // FIXED: Removed networkLocked (Admin only needs initialLoad)
   if (initialLoad || loading) return (
     <div className="min-h-screen bg-gray-50 p-4 md:p-6 flex flex-col gap-6 w-full max-w-7xl mx-auto">
       <div className="h-20 bg-white rounded-3xl animate-pulse shadow-sm w-full"></div>
@@ -994,6 +994,47 @@ export default function AdminPage() {
           {/* ========================================== */}
           {adminTab === 'operations' && (
             <div className="space-y-6 animate-in fade-in">
+              {/* GLOBAL DEVICE RESET BUTTON */}
+              <div className="flex flex-wrap gap-4 mb-4">
+                <button 
+                  onClick={async () => {
+                    const confirmed = window.confirm(
+                      "🚨 DANGER: This will unbind EVERY student's phone from the system. " +
+                      "They will have to log in again to lock their new device. Proceed?"
+                    );
+                    
+                    if (confirmed) {
+                      setIsProcessing(true);
+                      try {
+                        const token = await auth.currentUser?.getIdToken();
+                        const res = await fetch(`${API_URL}/admin/global-device-reset`, {
+                          method: 'POST',
+                          headers: { 
+                            'Authorization': `Bearer ${token}`,
+                            'Content-Type': 'application/json'
+                          }
+                        });
+                        
+                        if (res.ok) {
+                          alert("Nuclear Reset Complete: All devices unlinked. 🔓");
+                          fetchData(true); // Refresh data
+                        } else {
+                          alert("Reset failed. Check server logs.");
+                        }
+                      } catch (e) {
+                        alert("Network error during reset.");
+                      } finally {
+                        setIsProcessing(false);
+                      }
+                    }
+                  }}
+                  disabled={isProcessing}
+                  className="px-6 py-2.5 rounded-xl bg-red-600 text-white font-black text-[10px] uppercase tracking-widest shadow-xl hover:bg-red-700 active:scale-95 transition-all disabled:opacity-50"
+                >
+                  {isProcessing ? 'Wiping...' : 'Global Device Reset'}
+                </button>
+                {/* ...other operation buttons like Empty Trash... */}
+              </div>
               {/* STAT BOXES */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div className="p-6 rounded-3xl shadow-sm text-center border-b-4 border-[#FF5722] bg-white"><p className="text-[10px] font-black uppercase text-gray-400 mb-1 tracking-widest">Total Trips</p><p className="text-4xl font-black text-gray-900">{filteredMeetings.length}</p></div>
@@ -1284,9 +1325,16 @@ export default function AdminPage() {
                   </div>
                   
                   <div className="flex gap-2 overflow-x-auto no-scrollbar shrink-0">
-                    <select value={crmFilters.year} onChange={e => setCrmFilters({...crmFilters, year: e.target.value})} className="px-4 py-4 bg-gray-50 rounded-2xl font-bold text-xs outline-none border border-transparent focus:border-[#FF5722]">
+                    <select 
+                      value={crmFilters.year} 
+                      onChange={e => setCrmFilters({...crmFilters, year: e.target.value})} 
+                      className="px-4 py-4 bg-gray-50 border border-gray-100 rounded-xl font-bold text-xs outline-none focus:border-[#FF5722]"
+                    >
                       <option value="All">All Years</option>
-                      <option value="1">Year 1</option><option value="2">Year 2</option>
+                      <option value="1">Year 1</option>
+                      <option value="2">Year 2</option>
+                      <option value="3">Year 3</option>
+                      <option value="4">Year 4</option>
                     </select>
                     <select value={crmTab} onChange={e => setCrmTab(e.target.value as any)} className="px-4 py-4 bg-gray-50 rounded-2xl font-bold text-xs outline-none border border-transparent focus:border-[#FF5722]">
                       <option value="members">Members</option>
@@ -1300,25 +1348,45 @@ export default function AdminPage() {
               </div>
 
               {/* ADMIN TOOLS ROW */}
-              <div className="grid md:grid-cols-2 gap-4">
+              <div className="grid md:grid-cols-3 gap-4">
+                {/* Bulk Upload */}
                 <div className="bg-blue-50 border-2 border-dashed border-blue-200 rounded-2xl p-4 flex items-center justify-between hover:bg-blue-100 transition relative cursor-pointer">
                   <div>
                     <p className="text-[10px] font-black text-blue-600 uppercase tracking-widest">Bulk Upload Roster</p>
-                    <p className="text-[9px] font-bold text-blue-400 mt-1">Upload .csv file with headers: VTU, NAME</p>
+                    <p className="text-[9px] font-bold text-blue-400 mt-1">Upload .csv file (VTU, NAME)</p>
                   </div>
                   <span className="text-xl">📁</span>
                   <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept=".csv" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
                 </div>
                 
+                {/* Yearly Purge */}
                 <div className="bg-red-50 border border-red-100 rounded-2xl p-4 flex items-center justify-between">
                   <div>
                     <p className="text-[10px] font-black text-red-600 uppercase tracking-widest">Yearly Purge</p>
-                    <select value={selectedPurgeYear} onChange={(e) => setSelectedPurgeYear(e.target.value)} className="mt-1 px-2 py-1 text-[9px] rounded-md font-bold bg-white border border-red-200 outline-none mr-2 text-red-500">
+                    <select value={selectedPurgeYear} onChange={(e) => setSelectedPurgeYear(e.target.value)} className="mt-1 px-2 py-1 text-[9px] rounded-md font-bold bg-white border border-red-200 outline-none text-red-500">
                       <option value="1">Yr 1</option><option value="2">Yr 2</option><option value="3">Yr 3</option><option value="4">Yr 4</option>
                     </select>
                   </div>
-                  <button onClick={handleYearPurge} disabled={isPurging} className="px-4 py-2 bg-red-600 text-white rounded-lg font-black text-[9px] uppercase tracking-widest hover:bg-red-700 transition">
-                    {isPurging ? 'Purging...' : 'Delete Data'}
+                  <button onClick={handleYearPurge} disabled={isPurging} className="px-4 py-2 bg-red-600 text-white rounded-lg font-black text-[9px] uppercase tracking-widest hover:bg-red-700 transition disabled:opacity-50">Purge</button>
+                </div>
+
+                {/* 🚨 THE NUCLEAR RESET BUTTON (Moved here) */}
+                <div className="bg-[#111827] rounded-2xl p-4 flex items-center justify-between border-2 border-red-600/50">
+                  <div>
+                    <p className="text-[10px] font-black text-white uppercase tracking-widest">Nuclear Reset</p>
+                    <p className="text-[8px] font-bold text-gray-400 mt-1 uppercase">Clear All Phone Locks</p>
+                  </div>
+                  <button 
+                    onClick={async () => {
+                      if(confirm("🚨 DANGER: This will force EVERY student to re-link their phones. Proceed?")) {
+                        const token = await auth.currentUser?.getIdToken();
+                        const res = await fetch(`${API_URL}/admin/global-device-reset`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }});
+                        if(res.ok) alert("All devices unlinked! 🔓");
+                      }
+                    }}
+                    className="px-4 py-2 bg-red-600 text-white rounded-lg font-black text-[9px] uppercase tracking-widest hover:bg-red-700 active:scale-95 transition-all shadow-lg"
+                  >
+                    WIPE LOCKS
                   </button>
                 </div>
               </div>
@@ -1336,37 +1404,49 @@ export default function AdminPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-50">
-                      {crmUsers.slice(0, rosterLimit).map((u: any) => (
-                        <tr key={u.vtuNumber} className="hover:bg-orange-50/30 transition-colors">
-                          <td className="p-4">
-                            <p className="font-black text-sm text-gray-900">{u.name}</p>
-                            <p className="text-[10px] font-bold text-gray-400 uppercase">{u.vtuNumber} • {u.dept}</p>
-                          </td>
-                          <td className="p-4 text-center">
-                            <span className="bg-white px-3 py-1 rounded-lg border font-black text-orange-600">{u.eventsAttended}</span>
-                          </td>
-                          <td className="p-4">
-                            {/* FIX: Check both u.registeredDeviceId and nested u.userData */}
-                            {(u.registeredDeviceId || u.userData?.registeredDeviceId) ? (
-                              <span className="text-[9px] font-black text-gray-500 bg-gray-100 px-2 py-1 rounded">🔒 LOCKED</span>
-                            ) : (
-                              <span className="text-[9px] font-black text-red-500 bg-red-50 px-2 py-1 rounded animate-pulse">🔓 UNSET</span>
-                            )}
-                          </td>
-                          <td className="p-4 text-right">
-                            <button 
-                              onClick={() => executeCrmAction(crmTab === 'guests' ? '/admin/crm/promote' : '/admin/crm/demote', { vtu: u.vtuNumber }, "Roster Updated!")}
-                              className={`px-4 py-2 rounded-xl font-black text-[9px] uppercase tracking-widest active:scale-95 transition-all ${crmTab === 'guests' ? 'bg-green-600 text-white' : 'bg-red-50 text-red-500'}`}
-                            >
-                              {crmTab === 'guests' ? 'Promote' : 'Demote'}
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
+  {crmUsers
+    .filter((u: any) => {
+      const s = vtuLookup.toLowerCase();
+      // TRUE SEARCH: Matches against VTU, Name, or Dept
+      return !s || 
+             String(u.vtuNumber).toLowerCase().includes(s) || 
+             (u.name || '').toLowerCase().includes(s) || 
+             (u.dept || '').toLowerCase().includes(s);
+    })
+    // ⚡ BYPASS LIMIT: If search is active, show all matches. If not, show only 15.
+    .slice(0, vtuLookup ? 10000 : rosterLimit) 
+    .map((u: any) => (
+      <tr key={u.vtuNumber} className="hover:bg-orange-50/30 transition-colors group">
+         <td className="p-4">
+            <p className="font-black text-sm text-gray-900">{u.name}</p>
+            <p className="text-[10px] font-bold text-gray-400 uppercase">{u.vtuNumber} • {u.dept}</p>
+         </td>
+         <td className="p-4 text-center">
+            <span className="bg-white px-3 py-1 rounded-lg border font-black text-orange-600">{u.eventsAttended}</span>
+         </td>
+         <td className="p-4">
+            {/* FIX: Deep-check for Device ID */}
+            {(u.registeredDeviceId || u.userData?.registeredDeviceId) ? (
+              <span className="text-[9px] font-black text-gray-500 bg-gray-100 px-2 py-1 rounded border">🔒 LOCKED</span>
+            ) : (
+              <span className="text-[9px] font-black text-red-500 bg-red-50 px-2 py-1 rounded border border-red-100 animate-pulse">🔓 UNSET</span>
+            )}
+         </td>
+         <td className="p-4 text-right">
+            <button 
+              onClick={() => executeCrmAction(crmTab === 'guests' ? '/admin/crm/promote' : '/admin/crm/demote', { vtu: u.vtuNumber }, "Roster Updated!")}
+              className={`px-4 py-2 rounded-xl font-black text-[9px] uppercase tracking-widest active:scale-95 transition-all ${crmTab === 'guests' ? 'bg-green-600 text-white shadow-md' : 'bg-red-50 text-red-500'}`}
+            >
+              {crmTab === 'guests' ? 'Promote' : 'Demote'}
+            </button>
+         </td>
+      </tr>
+    ))}
+</tbody>
                   </table>
                 </div>
-                {crmUsers.length > rosterLimit && (
+                {/* LOAD MORE BUTTON */}
+                {crmUsers.length > rosterLimit && !vtuLookup && (
                   <button 
                     onClick={() => setRosterLimit(10000)} 
                     className="w-full py-6 bg-gray-50 text-gray-500 font-black uppercase text-xs tracking-widest hover:bg-gray-100 active:scale-95 transition-all border-t border-gray-100"

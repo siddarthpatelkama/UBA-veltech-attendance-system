@@ -192,41 +192,26 @@ export default function HomePage() {
       setLeaderboard(historyData.leaderboard || []);
       
       localStorage.setItem('uba_student_profile', JSON.stringify(combinedUserData));
-            // 🚀 ONESIGNAL INIT (NATIVE + WEB TWIST)
-            if (typeof window !== 'undefined') {
-              if ((window as any).Capacitor?.isNativePlatform()) {
-                // 📱 NATIVE APP USERS
-                try {
-                  const OneSignal = (window as any).plugins?.OneSignal;
-                  if (OneSignal) {
-                    OneSignal.initialize("19e04964-ec0f-44c4-a1df-e56989f568f8"); 
-                    OneSignal.Notifications.requestPermission(true);
-                    OneSignal.User.addTag("vtu", combinedUserData.vtuNumber);
-                    OneSignal.User.addTag("role", combinedUserData.role || "student");
-                    OneSignal.User.addTag("year", combinedUserData.year || "1");
-                  }
-                } catch (err) { console.log("Native OneSignal skipped"); }
-              } else {
-                // 💻 THE TWIST: WEB USERS (Only prompt if they DON'T have the mobile app)
-                if (!combinedUserData.registeredDeviceId) {
-                  // Inject Web SDK
-                  const script = document.createElement('script');
-                  script.src = "https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js";
-                  script.async = true;
-                  document.head.appendChild(script);
+      // 🚀 ONESIGNAL OVERRIDE: Prompts everyone on Web for testing
+      if (typeof window !== 'undefined') {
+        if (!(window as any).Capacitor?.isNativePlatform()) {
+          const script = document.createElement('script');
+          script.src = "https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js";
+          script.async = true;
+          document.head.appendChild(script);
 
-                  (window as any).OneSignalDeferred = (window as any).OneSignalDeferred || [];
-                  (window as any).OneSignalDeferred.push(function(OneSignal: any) {
-                    OneSignal.init({
-                      appId: "19e04964-ec0f-44c4-a1df-e56989f568f8",
-                    });
-                    OneSignal.User.addTag("vtu", combinedUserData.vtuNumber);
-                    OneSignal.User.addTag("role", combinedUserData.role || "student");
-                    OneSignal.User.addTag("year", combinedUserData.year || "1");
-                  });
-                }
-              }
-            }
+          (window as any).OneSignalDeferred = (window as any).OneSignalDeferred || [];
+          (window as any).OneSignalDeferred.push(function(OneSignal: any) {
+            OneSignal.init({ 
+              appId: "19e04964-ec0f-44c4-a1df-e56989f568f8",
+              allowLocalhostAsSecureOrigin: true, // Only for development
+            });
+            // Tag them so you can target them by VTU in the dashboard
+            OneSignal.User.addTag("vtu", combinedUserData.vtuNumber);
+            OneSignal.User.addTag("role", combinedUserData.role || "student");
+          });
+        }
+      }
       localStorage.setItem('uba_student_history', JSON.stringify(historyData.history || []));
       localStorage.setItem('uba_student_leaderboard', JSON.stringify(historyData.leaderboard || []));
 

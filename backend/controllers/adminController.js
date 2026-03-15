@@ -1,3 +1,40 @@
+// --- GLOBAL DEVICE RESET ---
+exports.globalDeviceReset = async (req, res) => {
+  // Security check: Only the Head Admin can trigger this
+  if (req.user.role !== "head") return res.status(403).json({ error: "Unauthorized" });
+
+  try {
+    const usersRef = db.collection("users");
+    // Find everyone who has a registered device
+    const snapshot = await usersRef.where("registeredDeviceId", "!=", null).get();
+
+    if (snapshot.empty) {
+      return res.json({ success: true, message: "No active device locks found." });
+    }
+
+    const batch = db.batch();
+    snapshot.docs.forEach((doc) => {
+      // Remove the field entirely from their document
+      batch.update(doc.ref, {
+        registeredDeviceId: admin.firestore.FieldValue.delete(),
+        updatedAt: Date.now()
+      });
+    });
+
+    await batch.commit();
+
+    // Reset server cache so the changes reflect instantly
+    if (global.ubaCache) global.ubaCache.lastUpdated = 0;
+
+    res.json({ 
+      success: true, 
+      message: `Successfully cleared ${snapshot.size} device bindings.` 
+    });
+  } catch (error) {
+    console.error("Global Reset Error:", error);
+    res.status(500).json({ error: "Failed to execute global reset." });
+  }
+};
 // --- CRM Promotion/Demotion Logic ---
 exports.promoteToMember = async (req, res) => {
   const { vtu } = req.body;
@@ -335,7 +372,11 @@ exports.getAllReports = async (req, res) => {
     res.json({ 
       meetings, 
       attendance, 
-      users: usersSnap ? usersSnap.docs.map(doc => doc.data()) : [], 
+      users: usersSnap ? usersSnap.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        registeredDeviceId: doc.data().registeredDeviceId
+      })) : [],
       suspiciousLogs,
       totalUsersCount: usersCountSnap.data().count, // Pass the cheap count to the frontend
       stats: { 

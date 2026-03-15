@@ -600,27 +600,18 @@ exports.getExcuses = async (req, res) => {
 // --- ACTIVATE SCHEDULED MEETING ---
 exports.activateScheduledMeeting = async (req, res) => {
   try {
-    if (req.user.role !== "head" && req.user.role !== "coordinator" && req.user.role !== "student_coordinator") {
-      return res.status(403).json({ success: false, message: "Access denied." });
-    }
-
     const { meetingId } = req.body;
-    if (!meetingId) return res.status(400).json({ error: "Missing meeting ID" });
+    if (!meetingId) return res.status(400).json({ error: "Missing ID" });
 
     const meetingRef = db.collection("meetings").doc(meetingId);
-    
-    // We update the status to active, and reset the createdAt timer so they get the full 30 minutes from RIGHT NOW.
     await meetingRef.update({
       status: "active",
       attendanceActive: true,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      startTime: Date.now(),
-      expiresAt: Date.now() + (60 * 60 * 1000)
+      startTime: Date.now()
     });
 
-    return res.json({ success: true, message: "Scheduled meeting is now live." });
-  } catch (error) {
-    console.error("Activate Error:", error);
-    return res.status(500).json({ success: false, message: "Failed to activate meeting" });
-  }
+    if (global.ubaCache) global.ubaCache.lastUpdated = 0; // Clear Cache
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: "Activation failed" }); }
 };

@@ -11,6 +11,10 @@ router.get('/broadcast/history', verifyToken, adminController.getBroadcastHistor
 router.post('/crm/promote', verifyToken, adminController.promoteToMember);
 router.post('/crm/demote', verifyToken, adminController.demoteToGuest);
 
+
+// --- Global Device Reset ---
+router.post('/global-device-reset', verifyToken, adminController.globalDeviceReset);
+
 // ...other admin routes...
 
 module.exports = router;
