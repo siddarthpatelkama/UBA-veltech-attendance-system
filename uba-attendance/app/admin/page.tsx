@@ -118,7 +118,7 @@ export default function AdminPage() {
 
   // CRM States
   const [crmTab, setCrmTab] = useState<'members' | 'guests'>('members');
-  const [crmFilters, setCrmFilters] = useState({ gender: 'All', year: 'All', minEvents: 1 });
+  const [crmFilters, setCrmFilters] = useState({ gender: 'All', year: 'All', minEvents: 0 });
 
   const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://uba-veltech-attendance-backend-system.onrender.com";
 
@@ -994,47 +994,6 @@ export default function AdminPage() {
           {/* ========================================== */}
           {adminTab === 'operations' && (
             <div className="space-y-6 animate-in fade-in">
-              {/* GLOBAL DEVICE RESET BUTTON */}
-              <div className="flex flex-wrap gap-4 mb-4">
-                <button 
-                  onClick={async () => {
-                    const confirmed = window.confirm(
-                      "🚨 DANGER: This will unbind EVERY student's phone from the system. " +
-                      "They will have to log in again to lock their new device. Proceed?"
-                    );
-                    
-                    if (confirmed) {
-                      setIsProcessing(true);
-                      try {
-                        const token = await auth.currentUser?.getIdToken();
-                        const res = await fetch(`${API_URL}/admin/global-device-reset`, {
-                          method: 'POST',
-                          headers: { 
-                            'Authorization': `Bearer ${token}`,
-                            'Content-Type': 'application/json'
-                          }
-                        });
-                        
-                        if (res.ok) {
-                          alert("Nuclear Reset Complete: All devices unlinked. 🔓");
-                          fetchData(true); // Refresh data
-                        } else {
-                          alert("Reset failed. Check server logs.");
-                        }
-                      } catch (e) {
-                        alert("Network error during reset.");
-                      } finally {
-                        setIsProcessing(false);
-                      }
-                    }
-                  }}
-                  disabled={isProcessing}
-                  className="px-6 py-2.5 rounded-xl bg-red-600 text-white font-black text-[10px] uppercase tracking-widest shadow-xl hover:bg-red-700 active:scale-95 transition-all disabled:opacity-50"
-                >
-                  {isProcessing ? 'Wiping...' : 'Global Device Reset'}
-                </button>
-                {/* ...other operation buttons like Empty Trash... */}
-              </div>
               {/* STAT BOXES */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div className="p-6 rounded-3xl shadow-sm text-center border-b-4 border-[#FF5722] bg-white"><p className="text-[10px] font-black uppercase text-gray-400 mb-1 tracking-widest">Total Trips</p><p className="text-4xl font-black text-gray-900">{filteredMeetings.length}</p></div>
@@ -1122,48 +1081,51 @@ export default function AdminPage() {
               const tabMissing = manifest.filter((man: any) => !attendees.some((att: any) => String(att.vtuNumber) === String(man.vtu)));
 
               return (
-                <div key={m.id} className={`p-6 md:p-8 rounded-[3rem] shadow-lg relative transition-all group ${m.isSOS ? 'border-4 border-red-600 bg-red-50 hover:border-red-700' : 'border border-[#FF5722] bg-white hover:border-[#FF5722]'}`}>
-                  <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-6 gap-4">
+                // FIX 1: Tighter border radius (rounded-2xl), reduced padding (p-5), subtle shadow
+                <div key={m.id} className={`p-5 md:p-6 rounded-2xl shadow-sm relative transition-all group ${m.isSOS ? 'border-2 border-red-500 bg-red-50 hover:shadow-md' : 'border border-gray-200 bg-white hover:border-orange-300 hover:shadow-md'}`}>
+                  {/* FIX 2: Aligned Header with a clean bottom border */}
+                  <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-4 gap-4 border-b border-gray-100 pb-4">
                      <div>
                        <div className="flex items-center gap-3">
-                         <h3 className="font-black text-2xl uppercase italic tracking-tighter text-gray-900">{m.isSOS ? `🚨 ${m.title || m.meetingTitle}` : m.title}</h3>
+                         <h3 className="font-black text-xl uppercase tracking-tight text-gray-900">{m.isSOS ? `🚨 ${m.title || m.meetingTitle}` : m.title}</h3>
                          {m.status === 'active' && !m.isSOS && <span className="bg-[#FF5722] text-white text-[8px] font-black px-2 py-0.5 rounded animate-pulse uppercase tracking-widest">Live Now</span>}
                          {m.isSOS && <span className="bg-red-600 text-white text-[8px] font-black px-2 py-1 rounded uppercase tracking-widest animate-pulse">SOS</span>}
                        </div>
                        <p className="text-[10px] font-bold text-gray-400 mt-1 uppercase tracking-widest">{m.isSOS ? `🚨 EMERGENCY SESSION BY: ${m.coordinatorEmail || m.syncedBy || 'Unknown'}` : `Host: ${m.createdByName || m.coordinatorId}`}</p>
                      </div>
                      <div className="flex flex-wrap gap-2 w-full lg:w-auto">
-                       <button onClick={() => setAnalyticsViewMap({...analyticsViewMap, [m.id]: !isAnalytics})} className={`flex-1 lg:flex-none px-4 py-3 rounded-xl text-[9px] font-black border transition uppercase shadow-sm tracking-widest ${isAnalytics ? 'bg-gray-900 text-white' : 'text-[#FF5722] border-[#FF5722] bg-[#FFF9F5]'}`}>{isAnalytics ? 'Close Analytics' : 'Analytics'}</button>
-                       <button onClick={() => downloadMeetingCSV(m.id, m.title)} className="flex-1 lg:flex-none px-4 py-3 rounded-xl text-[9px] font-black border border-gray-200 hover:bg-gray-50 shadow-sm uppercase tracking-widest">Export</button>
-                       <button onClick={() => handleDeleteMeeting(m.id, m.isSOS)} className="px-4 py-3 rounded-xl text-[9px] bg-red-50 font-black text-red-500 hover:bg-red-500 hover:text-white transition shadow-sm uppercase tracking-widest">Archive</button>
+                       {/* FIX 3: Tighter, aligned buttons */}
+                       <button onClick={() => setAnalyticsViewMap({...analyticsViewMap, [m.id]: !isAnalytics})} className={`px-3 py-2 rounded-lg text-[9px] font-black border transition uppercase shadow-sm tracking-widest ${isAnalytics ? 'bg-gray-900 text-white border-gray-900' : 'text-[#FF5722] border-[#FF5722]/30 bg-orange-50 hover:bg-orange-100'}`}>{isAnalytics ? 'Close Analytics' : 'Analytics'}</button>
+                       <button onClick={() => downloadMeetingCSV(m.id, m.title)} className="px-3 py-2 rounded-lg text-[9px] font-black border border-gray-200 hover:bg-gray-50 shadow-sm uppercase tracking-widest text-gray-700">Export</button>
+                       <button onClick={() => handleDeleteMeeting(m.id, m.isSOS)} className="px-3 py-2 rounded-lg text-[9px] bg-red-50 font-black text-red-600 hover:bg-red-500 hover:text-white transition shadow-sm border border-red-100 uppercase tracking-widest">Archive</button>
                      </div>
                   </div>
 
                   {isAnalytics && (
-                    <div className="space-y-8 animate-in fade-in duration-300 bg-gray-50 p-6 rounded-3xl mb-6 border border-gray-100">
+                    <div className="space-y-6 animate-in fade-in duration-300 bg-gray-50/50 p-5 rounded-2xl mb-4 border border-gray-100">
                       
-                      {/* STAT CARDS */}
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                        <div className="p-4 md:p-6 rounded-[2rem] bg-blue-50 text-center border border-blue-100 shadow-inner">
+                      {/* STAT CARDS (Made slightly more compact) */}
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        <div className="p-4 rounded-xl bg-blue-50 text-center border border-blue-100 shadow-sm">
                            <p className="text-[9px] font-black text-blue-400 uppercase mb-1 tracking-widest">Boys</p>
-                           <h4 className="text-3xl md:text-4xl font-black text-blue-600">{stats.gender['Male'] || 0}</h4>
+                           <h4 className="text-2xl md:text-3xl font-black text-blue-600">{stats.gender['Male'] || 0}</h4>
                         </div>
-                        <div className="p-4 md:p-6 rounded-[2rem] bg-pink-50 text-center border border-pink-100 shadow-inner">
+                        <div className="p-4 rounded-xl bg-pink-50 text-center border border-pink-100 shadow-sm">
                            <p className="text-[9px] font-black text-pink-400 uppercase mb-1 tracking-widest">Girls</p>
-                           <h4 className="text-3xl md:text-4xl font-black text-pink-500">{stats.gender['Female'] || 0}</h4>
+                           <h4 className="text-2xl md:text-3xl font-black text-pink-500">{stats.gender['Female'] || 0}</h4>
                         </div>
-                        <div className="p-4 md:p-6 rounded-[2rem] bg-gray-50 text-center border border-gray-200 shadow-sm">
-                           <p className="text-[9px] font-black text-gray-400 uppercase mb-1 tracking-widest">Unspecified</p>
-                           <h4 className="text-3xl md:text-4xl font-black text-gray-500">{stats.gender['Unspecified'] || 0}</h4>
+                        <div className="p-4 rounded-xl bg-gray-50 text-center border border-gray-200 shadow-sm">
+                           <p className="text-[9px] font-black text-gray-400 uppercase mb-1 tracking-widest">Unspec</p>
+                           <h4 className="text-2xl md:text-3xl font-black text-gray-500">{stats.gender['Unspecified'] || 0}</h4>
                         </div>
-                        <div className="p-4 md:p-6 rounded-[2rem] bg-white text-center border border-gray-200 shadow-sm">
+                        <div className="p-4 rounded-xl bg-white text-center border border-gray-200 shadow-sm">
                            <p className="text-[9px] font-black text-[#FF5722] uppercase mb-1 tracking-widest">Total</p>
-                           <h4 className="text-3xl md:text-4xl font-black text-gray-900">{attendees.length}</h4>
+                           <h4 className="text-2xl md:text-3xl font-black text-gray-900">{attendees.length}</h4>
                         </div>
                       </div>
 
                       {/* BAR CHART */}
-                      <div className="p-6 rounded-[2.5rem] border border-gray-200 bg-white flex items-end justify-between h-48 px-4 md:px-10 gap-2 shadow-sm mt-4">
+                      <div className="p-5 rounded-2xl border border-gray-200 bg-white flex items-end justify-between h-40 px-4 md:px-8 gap-2 shadow-sm">
                         {[1, 2, 3, 4].map(y => {
                           const yData = stats.years[y.toString()] || { Male: 0, Female: 0, Unspecified: 0, total: 0 };
                           const maxArr = [1,2,3,4].map(yr => (stats.years[yr.toString()]?.total || 0));
@@ -1171,7 +1133,7 @@ export default function AdminPage() {
                           const height = (yData.total / max) * 100;
                           return (
                             <div key={y} className="flex-1 flex flex-col items-center gap-2 h-full justify-end group">
-                               <div className="w-8 md:w-16 bg-gray-50 rounded-t-xl overflow-hidden shadow-inner flex flex-col-reverse transition-all duration-500 border border-gray-100" style={{ height: `${Math.max(height, 5)}%` }}>
+                               <div className="w-8 md:w-12 bg-gray-50 rounded-t-lg overflow-hidden shadow-inner flex flex-col-reverse transition-all duration-500 border border-gray-100" style={{ height: `${Math.max(height, 5)}%` }}>
                                   <div className="w-full bg-blue-500 transition-all" style={{ height: `${yData.total > 0 ? (yData.Male / yData.total) * 100 : 0}%` }}></div>
                                   <div className="w-full bg-pink-500 transition-all" style={{ height: `${yData.total > 0 ? (yData.Female / yData.total) * 100 : 0}%` }}></div>
                                   <div className="w-full bg-gray-300 transition-all" style={{ height: `${yData.total > 0 ? (yData.Unspecified / yData.total) * 100 : 0}%` }}></div>
@@ -1183,20 +1145,20 @@ export default function AdminPage() {
                       </div>
 
                       {/* TABS SYSTEM */}
-                      <div className="border-t-2 border-dashed border-gray-200 pt-6">
-                        <div className="flex overflow-x-auto border-b border-gray-200 mb-4 shrink-0 no-scrollbar gap-2 pb-2">
-                          <button onClick={() => setTab('verified')} className={`flex-1 py-3 px-4 font-black text-[9px] uppercase tracking-widest transition-all whitespace-nowrap rounded-xl ${activeTab === 'verified' ? 'text-white bg-[#111827] shadow-md' : 'text-gray-500 bg-gray-100 hover:bg-gray-200'}`}>Verified ({tabVerified.length})</button>
-                          {m.type === 'verifiable' && <button onClick={() => setTab('missing')} className={`flex-1 py-3 px-4 font-black text-[9px] uppercase tracking-widest transition-all whitespace-nowrap rounded-xl ${activeTab === 'missing' ? 'text-white bg-red-500 shadow-md' : 'text-red-500 bg-red-50 hover:bg-red-100'}`}>Abandoned ({tabMissing.length})</button>}
-                          <button onClick={() => setTab('manual')} className={`flex-1 py-3 px-4 font-black text-[9px] uppercase tracking-widest transition-all whitespace-nowrap rounded-xl ${activeTab === 'manual' ? 'text-gray-900 border-2 border-gray-900 bg-white' : 'text-gray-500 bg-gray-100 hover:bg-gray-200'}`}>Manual ({tabManual.length})</button>
-                          <button onClick={() => setTab('suspicious')} className={`flex-1 py-3 px-4 font-black text-[9px] uppercase tracking-widest transition-all whitespace-nowrap rounded-xl ${activeTab === 'suspicious' ? 'text-purple-700 bg-purple-200 shadow-md' : 'text-purple-500 bg-purple-50 hover:bg-purple-100'}`}>Suspicious ({suspicious.length})</button>
+                      <div className="border-t border-gray-200 pt-5">
+                        <div className="flex overflow-x-auto border-b border-gray-200 mb-3 shrink-0 no-scrollbar gap-2 pb-2">
+                          <button onClick={() => setTab('verified')} className={`flex-1 py-2 px-3 font-black text-[9px] uppercase tracking-widest transition-all whitespace-nowrap rounded-lg ${activeTab === 'verified' ? 'text-white bg-[#111827] shadow-sm' : 'text-gray-500 bg-white hover:bg-gray-100 border border-gray-200'}`}>Verified ({tabVerified.length})</button>
+                          {m.type === 'verifiable' && <button onClick={() => setTab('missing')} className={`flex-1 py-2 px-3 font-black text-[9px] uppercase tracking-widest transition-all whitespace-nowrap rounded-lg ${activeTab === 'missing' ? 'text-white bg-red-500 shadow-sm' : 'text-red-500 bg-red-50 hover:bg-red-100 border border-red-100'}`}>Abandoned ({tabMissing.length})</button>}
+                          <button onClick={() => setTab('manual')} className={`flex-1 py-2 px-3 font-black text-[9px] uppercase tracking-widest transition-all whitespace-nowrap rounded-lg ${activeTab === 'manual' ? 'text-gray-900 border border-gray-900 bg-white shadow-sm' : 'text-gray-500 bg-white hover:bg-gray-100 border border-gray-200'}`}>Manual ({tabManual.length})</button>
+                          <button onClick={() => setTab('suspicious')} className={`flex-1 py-2 px-3 font-black text-[9px] uppercase tracking-widest transition-all whitespace-nowrap rounded-lg ${activeTab === 'suspicious' ? 'text-purple-700 bg-purple-200 shadow-sm border border-purple-300' : 'text-purple-500 bg-purple-50 hover:bg-purple-100 border border-purple-100'}`}>Suspicious ({suspicious.length})</button>
                         </div>
 
-                        <div className="grid md:grid-cols-2 gap-3 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
+                        <div className="grid md:grid-cols-2 gap-2 max-h-[240px] overflow-y-auto pr-2 custom-scrollbar">
                           {activeTab === 'verified' && tabVerified.map((at:any, i:number) => {
                            const dbUser = (data.users || []).find((u:any)=>String(u.vtuNumber) === String(at.vtuNumber));
                            return (
-                             <div key={i} onClick={() => setSelectedStudent({...at, studentName: dbUser?.name || at.studentName || 'Unknown', userData: dbUser || at.userData || {}, dept: dbUser?.dept || at.dept || 'N/A', year: dbUser?.year || at.year || 'N/A', gender: dbUser?.gender || at.gender || 'N/A'})} className="p-4 rounded-2xl border border-gray-200 bg-white flex justify-between items-center shadow-sm hover:border-[#FF5722] hover:shadow-md transition-all cursor-pointer">
-                               <div><p className="font-bold text-sm text-gray-900 capitalize truncate w-40">{at.studentName}</p><p className="text-[10px] font-mono font-black text-[#FF5722] mt-0.5">{at.vtuNumber}</p></div>
+                             <div key={i} onClick={() => setSelectedStudent({...at, studentName: dbUser?.name || at.studentName || 'Unknown', userData: dbUser || at.userData || {}, dept: dbUser?.dept || at.dept || 'N/A', year: dbUser?.year || at.year || 'N/A', gender: dbUser?.gender || at.gender || 'N/A'})} className="p-3 rounded-xl border border-gray-200 bg-white flex justify-between items-center shadow-sm hover:border-[#FF5722] cursor-pointer">
+                               <div className="overflow-hidden pr-2"><p className="font-bold text-xs text-gray-900 capitalize truncate">{at.studentName}</p><p className="text-[9px] font-mono font-black text-[#FF5722] mt-0.5">{at.vtuNumber}</p></div>
                              </div>
                            );
                           })}
@@ -1204,9 +1166,9 @@ export default function AdminPage() {
                           {activeTab === 'missing' && tabMissing.map((m:any, i:number) => {
                            const dbUser = (data.users || []).find((u:any)=>String(u.vtuNumber) === String(m.vtu));
                            return (
-                             <div key={i} onClick={() => setSelectedStudent({studentName: dbUser?.name || m.name || 'Unknown', vtuNumber: m.vtu, userData: dbUser || {}, dept: dbUser?.dept || 'N/A', year: dbUser?.year || 'N/A', gender: dbUser?.gender || 'N/A'})} className="p-4 rounded-2xl border border-red-200 bg-red-50 flex justify-between items-center shadow-sm hover:bg-red-100 transition-all cursor-pointer">
-                               <div><p className="font-bold text-sm text-red-900 capitalize truncate w-40">{m.name}</p><p className="text-[10px] font-mono font-black text-red-500 mt-0.5">{m.vtu}</p></div>
-                               <span className="text-[8px] px-2 py-1 bg-red-600 text-white font-black rounded uppercase tracking-widest shadow-sm">Missing</span>
+                             <div key={i} onClick={() => setSelectedStudent({studentName: dbUser?.name || m.name || 'Unknown', vtuNumber: m.vtu, userData: dbUser || {}, dept: dbUser?.dept || 'N/A', year: dbUser?.year || 'N/A', gender: dbUser?.gender || 'N/A'})} className="p-3 rounded-xl border border-red-200 bg-red-50 flex justify-between items-center shadow-sm hover:bg-red-100 cursor-pointer">
+                               <div className="overflow-hidden pr-2"><p className="font-bold text-xs text-red-900 capitalize truncate">{m.name}</p><p className="text-[9px] font-mono font-black text-red-500 mt-0.5">{m.vtu}</p></div>
+                               <span className="shrink-0 text-[8px] px-2 py-1 bg-red-600 text-white font-black rounded uppercase tracking-widest">Missing</span>
                              </div>
                            );
                           })}
@@ -1214,20 +1176,20 @@ export default function AdminPage() {
                           {activeTab === 'manual' && tabManual.map((at:any, i:number) => {
                            const dbUser = (data.users || []).find((u:any)=>String(u.vtuNumber) === String(at.vtuNumber));
                            return (
-                             <div key={i} onClick={() => setSelectedStudent({...at, studentName: dbUser?.name || at.studentName || 'Unknown', userData: dbUser || at.userData || {}, dept: dbUser?.dept || at.dept || 'N/A', year: dbUser?.year || at.year || 'N/A', gender: dbUser?.gender || at.gender || 'N/A'})} className="p-4 rounded-2xl border-2 border-dashed border-gray-300 bg-white flex justify-between items-center cursor-pointer hover:border-gray-500 transition-colors">
-                               <div><p className="font-bold text-sm text-gray-900 capitalize truncate w-32">{at.studentName}</p><p className="text-[10px] font-mono font-black text-gray-500 mt-0.5">{at.vtuNumber}</p></div>
-                               <div className="text-right"><p className="text-[8px] bg-gray-900 text-white px-2 py-1 rounded font-black uppercase tracking-widest mb-1 inline-block">Manual</p><p className="text-[8px] font-bold text-gray-400 italic block truncate w-20">By {at.enteredBy?.split('@')[0]}</p></div>
+                             <div key={i} onClick={() => setSelectedStudent({...at, studentName: dbUser?.name || at.studentName || 'Unknown', userData: dbUser || at.userData || {}, dept: dbUser?.dept || at.dept || 'N/A', year: dbUser?.year || at.year || 'N/A', gender: dbUser?.gender || at.gender || 'N/A'})} className="p-3 rounded-xl border border-orange-200 bg-orange-50 flex justify-between items-center cursor-pointer hover:border-orange-300">
+                               <div className="overflow-hidden pr-2"><p className="font-bold text-xs text-gray-900 capitalize truncate">{at.studentName}</p><p className="text-[9px] font-mono font-black text-gray-500 mt-0.5">{at.vtuNumber}</p></div>
+                               <div className="text-right shrink-0"><p className="text-[8px] bg-orange-500 text-white px-2 py-1 rounded font-black uppercase tracking-widest mb-0.5 inline-block">Manual</p><p className="text-[8px] font-bold text-orange-400 italic block truncate w-16">By {at.enteredBy?.split('@')[0]}</p></div>
                              </div>
                            );
                           })}
 
                           {activeTab === 'suspicious' && suspicious.map((log: any, i: number) => (
-                            <div key={i} className="p-4 bg-purple-50 border border-purple-300 rounded-2xl flex justify-between items-center col-span-1 md:col-span-2 shadow-sm">
-                              <div>
-                                <p className="text-[10px] font-black text-purple-700 uppercase tracking-widest mb-2 flex items-center gap-2"><span className="text-lg">🚨</span> Proxy Blocked</p>
-                                <div className="flex gap-4">
-                                  <p className="text-[9px] font-bold text-gray-500 uppercase">Input ID: <span className="font-mono text-black font-black">{log.proxyVtu}</span></p>
-                                  <p className="text-[9px] font-bold text-gray-500 uppercase border-l border-purple-200 pl-4">Phone Owner: <span className="font-mono text-black font-black">{log.originalVtu}</span></p>
+                            <div key={i} className="p-3 bg-purple-50 border border-purple-200 rounded-xl flex justify-between items-center col-span-1 md:col-span-2 shadow-sm">
+                              <div className="overflow-hidden">
+                                <p className="text-[9px] font-black text-purple-700 uppercase tracking-widest mb-1 flex items-center gap-1"><span className="text-sm">🚨</span> Proxy Blocked</p>
+                                <div className="flex gap-3">
+                                  <p className="text-[8px] font-bold text-gray-500 uppercase truncate">Input: <span className="font-mono text-black font-black">{log.proxyVtu}</span></p>
+                                  <p className="text-[8px] font-bold text-gray-500 uppercase border-l border-purple-200 pl-3 truncate">Owner: <span className="font-mono text-black font-black">{log.originalVtu}</span></p>
                                 </div>
                               </div>
                             </div>
@@ -1237,9 +1199,8 @@ export default function AdminPage() {
                             (activeTab === 'missing' && tabMissing.length === 0) || 
                             (activeTab === 'manual' && tabManual.length === 0) || 
                             (activeTab === 'suspicious' && suspicious.length === 0)) && 
-                            <div className="col-span-1 md:col-span-2 py-10 flex flex-col items-center justify-center border-2 border-dashed border-gray-200 rounded-3xl bg-white">
-                              <span className="text-3xl grayscale opacity-30 mb-2">📭</span>
-                              <p className="text-gray-400 text-[10px] font-black uppercase tracking-widest text-center">No data found in this category</p>
+                            <div className="col-span-1 md:col-span-2 py-8 flex flex-col items-center justify-center border border-dashed border-gray-200 rounded-2xl bg-white">
+                              <p className="text-gray-400 text-[9px] font-black uppercase tracking-widest text-center">No data found</p>
                             </div>
                           }
                         </div>
@@ -1248,16 +1209,21 @@ export default function AdminPage() {
                   )}
 
                   {!isAnalytics && (
-                    <div className="grid md:grid-cols-2 gap-3 max-h-[250px] overflow-y-auto pr-2 custom-scrollbar">
+                    // FIX 4: Compact Grid (3 cols on large screens), smaller cards, custom manual backgrounds
+                    <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-2 max-h-[200px] overflow-y-auto pr-2 custom-scrollbar">
                       {attendees.map((at:any, i:number) => {
                         const dbUser = (data.users || []).find((u:any)=>String(u.vtuNumber) === String(at.vtuNumber));
                         return (
-                        <div key={i} onClick={() => setSelectedStudent({...at, studentName: dbUser?.name || at.studentName || 'Unknown', userData: dbUser || at.userData || {}, dept: dbUser?.dept || at.dept || 'N/A', year: dbUser?.year || at.year || 'N/A', gender: dbUser?.gender || at.gender || 'N/A'})} className="p-4 rounded-2xl border border-gray-100 bg-[#FFF9F5]/40 flex justify-between items-center hover:bg-white hover:border-[#FF5722] hover:shadow-md cursor-pointer transition-all group">
-                           <div>
-                             <p className="font-bold text-sm text-gray-900 truncate w-32 capitalize group-hover:text-[#FF5722] transition-colors">{at.studentName}</p>
-                             <p className="text-[10px] font-mono font-bold text-gray-400 group-hover:text-gray-900 transition-colors mt-0.5">{at.vtuNumber}</p>
+                        <div key={i} onClick={() => setSelectedStudent({...at, studentName: dbUser?.name || at.studentName || 'Unknown', userData: dbUser || at.userData || {}, dept: dbUser?.dept || at.dept || 'N/A', year: dbUser?.year || at.year || 'N/A', gender: dbUser?.gender || at.gender || 'N/A'})} className={`p-3 rounded-xl border ${at.isOverride ? 'border-orange-200 bg-orange-50/50 hover:border-orange-400' : 'border-gray-100 bg-gray-50/50 hover:bg-white hover:border-[#FF5722] hover:shadow-sm'} flex justify-between items-center cursor-pointer transition-all group`}>
+                           <div className="overflow-hidden pr-2">
+                             <p className="font-bold text-xs text-gray-900 truncate capitalize group-hover:text-[#FF5722] transition-colors">{dbUser?.name || at.studentName || 'Unknown'}</p>
+                             <p className="text-[9px] font-mono font-bold text-gray-400 group-hover:text-gray-700 transition-colors mt-0.5">{at.vtuNumber}</p>
                            </div>
-                           {at.isOverride && <span className="block text-[7px] text-red-500 font-black uppercase tracking-[0.2em] mt-1">Manual</span>}
+                           {at.isOverride ? (
+                              <span className="shrink-0 block text-[8px] bg-orange-100 text-orange-600 px-2 py-1 rounded font-black uppercase tracking-widest">Manual</span>
+                           ) : (
+                              <span className="shrink-0 block text-[8px] bg-green-50 text-green-600 px-2 py-1 rounded font-black uppercase tracking-widest">Verified</span>
+                           )}
                         </div>
                         );
                       })}
@@ -1348,9 +1314,9 @@ export default function AdminPage() {
               </div>
 
               {/* ADMIN TOOLS ROW */}
-              <div className="grid md:grid-cols-3 gap-4">
+              <div className="grid md:grid-cols-3 gap-4 mt-6">
                 {/* Bulk Upload */}
-                <div className="bg-blue-50 border-2 border-dashed border-blue-200 rounded-2xl p-4 flex items-center justify-between hover:bg-blue-100 transition relative cursor-pointer">
+                <div className="bg-blue-50 border-2 border-dashed border-blue-200 rounded-2xl p-4 flex items-center justify-between hover:bg-blue-100 transition relative cursor-pointer shadow-sm">
                   <div>
                     <p className="text-[10px] font-black text-blue-600 uppercase tracking-widest">Bulk Upload Roster</p>
                     <p className="text-[9px] font-bold text-blue-400 mt-1">Upload .csv file (VTU, NAME)</p>
@@ -1360,7 +1326,7 @@ export default function AdminPage() {
                 </div>
                 
                 {/* Yearly Purge */}
-                <div className="bg-red-50 border border-red-100 rounded-2xl p-4 flex items-center justify-between">
+                <div className="bg-red-50 border border-red-100 rounded-2xl p-4 flex items-center justify-between shadow-sm">
                   <div>
                     <p className="text-[10px] font-black text-red-600 uppercase tracking-widest">Yearly Purge</p>
                     <select value={selectedPurgeYear} onChange={(e) => setSelectedPurgeYear(e.target.value)} className="mt-1 px-2 py-1 text-[9px] rounded-md font-bold bg-white border border-red-200 outline-none text-red-500">
@@ -1370,8 +1336,8 @@ export default function AdminPage() {
                   <button onClick={handleYearPurge} disabled={isPurging} className="px-4 py-2 bg-red-600 text-white rounded-lg font-black text-[9px] uppercase tracking-widest hover:bg-red-700 transition disabled:opacity-50">Purge</button>
                 </div>
 
-                {/* 🚨 THE NUCLEAR RESET BUTTON (Moved here) */}
-                <div className="bg-[#111827] rounded-2xl p-4 flex items-center justify-between border-2 border-red-600/50">
+                {/* 🚨 NUCLEAR RESET BUTTON */}
+                <div className="bg-[#111827] rounded-2xl p-4 flex items-center justify-between border-2 border-red-600/50 shadow-md">
                   <div>
                     <p className="text-[10px] font-black text-white uppercase tracking-widest">Nuclear Reset</p>
                     <p className="text-[8px] font-bold text-gray-400 mt-1 uppercase">Clear All Phone Locks</p>

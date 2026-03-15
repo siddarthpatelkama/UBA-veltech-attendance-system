@@ -28,9 +28,40 @@ app.use((req, res, next) => {
 app.use("/", attendanceRoutes);
 app.use("/admin", adminRoutes);
 
-// --- THE 24/7 KEEP-ALIVE PING ---
-app.get('/keep-alive', (req, res) => {
-  res.status(200).send("UBA Server is awake and RAM cache is active.");
+const db = require('./config/firebase');
+
+// --- THE 24/7 KEEP-ALIVE & MORNING BOOT SYSTEM ---
+app.get('/keep-alive', async (req, res) => {
+  const now = Date.now();
+
+  if (!global.ubaCache) {
+    global.ubaCache = { meetings: [], attendance: [], suspiciousLogs: [], users: [], lastUpdated: 0 };
+  }
+
+  // 🌅 MORNING BOOT DETECTION (Last Updated is 0 when Render wakes up)
+  if (global.ubaCache.lastUpdated === 0) {
+    console.log("🌅 Morning Boot Sequence: Warming up RAM Cache...");
+    try {
+      const [meetingsSnap, masterSnap, attSnap] = await Promise.all([
+        db.collection("meetings").orderBy("createdAt", "desc").limit(50).get(),
+        db.collection("master_roster").get(),
+        db.collection("attendance").orderBy("timestamp", "desc").limit(5000).get() // RAM Shield: Max 5000 scans
+      ]);
+
+      global.ubaCache.meetings = meetingsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      global.ubaCache.users = masterSnap.docs.map(doc => ({ ...doc.data(), vtuNumber: doc.id }));
+      global.ubaCache.attendance = attSnap.docs.map(doc => doc.data());
+      global.ubaCache.lastUpdated = now;
+
+      console.log(`✅ Cache loaded! (${global.ubaCache.users.length} Users in RAM)`);
+    } catch (error) {
+      console.error("❌ Morning Boot failed:", error);
+    }
+  } else {
+    console.log("⚡ Daytime Heartbeat: Server is warm.");
+  }
+
+  res.status(200).send("UBA Server is Online & Warmed Up.");
 });
 
 const http = require('http');

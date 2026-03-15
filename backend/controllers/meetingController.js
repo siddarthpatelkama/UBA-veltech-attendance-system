@@ -201,11 +201,11 @@ exports.getMeetings = async (req, res) => {
     const snapshot = await db.collection("meetings").orderBy("createdAt", "desc").limit(30).get();
     const meetings = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
-    const activeMeetings = meetings.filter(m => m.status === 'active').map(m => m.id);
+    // ⚡ FIX: Fetch attendance for the 10 most recent meetings (Active OR Closed)
+    const recentMeetingIds = meetings.slice(0, 10).map(m => m.id);
     let attendanceDocs = [];
-    if (activeMeetings.length > 0) {
-      const safeActive = activeMeetings.slice(0, 10);
-      const attSnap = await db.collection("attendance").where("meetingId", "in", safeActive).get();
+    if (recentMeetingIds.length > 0) {
+      const attSnap = await db.collection("attendance").where("meetingId", "in", recentMeetingIds).get();
       attendanceDocs = attSnap.docs.map(doc => doc.data());
     }
 

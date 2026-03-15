@@ -39,27 +39,53 @@ exports.globalDeviceReset = async (req, res) => {
 exports.promoteToMember = async (req, res) => {
   const { vtu } = req.body;
   try {
-    const tempRef = db.collection("temporary_roster").doc(vtu);
-    const tempDoc = await tempRef.get();
+    // 1. Find the user in the live 'users' collection (where new signups go)
+    const usersRef = db.collection("users");
+    const snapshot = await usersRef.where("vtuNumber", "==", vtu).get();
     
-    if (!tempDoc.exists) return res.status(404).json({ error: "Student not found in temporary list" });
-    
-    const studentData = tempDoc.data();
+    let userData = {};
+    let userDocId = null;
 
-    // Move to Master Roster & Set Member status
-    await db.collection("master_roster").doc(vtu).set({
-      ...studentData,
+    if (!snapshot.empty) {
+      userData = snapshot.docs[0].data();
+      userDocId = snapshot.docs[0].id;
+    } else {
+      // Fallback: Check temporary roster if they haven't logged into the app yet
+      const tempDoc = await db.collection("temporary_roster").doc(vtu).get();
+      if (!tempDoc.exists) return res.status(404).json({ error: "Student not found in system." });
+      userData = tempDoc.data();
+    }
+
+    const batch = db.batch();
+
+    // 2. Add them to the Official Master Roster
+    const masterRef = db.collection("master_roster").doc(vtu);
+    batch.set(masterRef, {
+      ...userData,
+      vtuNumber: vtu,
       isGuest: false,
       promotedAt: Date.now(),
       promotedBy: req.user.email
-    });
+    }, { merge: true });
 
-    await tempRef.delete(); // Remove the old entry
-    if (global.ubaCache) global.ubaCache.lastUpdated = 0; // Reset cache to show changes
+    // 3. Delete them from the temporary/trash roster
+    const tempRef = db.collection("temporary_roster").doc(vtu);
+    batch.delete(tempRef);
 
-    res.json({ success: true, message: "Promoted to Member status!" });
+    // 4. Update their App Profile so it instantly says "Verified Member"
+    if (userDocId) {
+      batch.update(usersRef.doc(userDocId), { isGuest: false });
+    }
+
+    await batch.commit();
+
+    // 5. Trip the wire to force the RAM Cache to refresh!
+    if (global.ubaCache) global.ubaCache.lastUpdated = 0;
+
+    res.json({ success: true, message: "Promoted to Member status! 👑" });
   } catch (error) {
-    res.status(500).json({ error: "Promotion failed" });
+    console.error("Promote Error:", error);
+    res.status(500).json({ error: "Promotion failed. Check server logs." });
   }
 };
 

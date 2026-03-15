@@ -189,52 +189,32 @@ exports.getUserProfile = async (req, res) => {
  */
 exports.getStudentHistory = async (req, res) => {
   try {
-    const vtu = getSafeVtu(req.user); // FIXED
-    
-    const historySnap = await db.collection("attendance").where("vtuNumber", "==", vtu).get();
-    const rawHistory = historySnap.docs.map(doc => doc.data());
+    const email = req.user.email.toLowerCase().trim();
+    const vtu = email.split('@')[0].toUpperCase().replace(/\D/g, '');
 
-    const enrichedHistory = await Promise.all(rawHistory.map(async (record) => {
-      let meetingTitle = "Unknown Session";
-      let coordinatorName = "Unknown Coordinator";
+    const now = Date.now();
+    const isCacheFresh = global.ubaCache && global.ubaCache.lastUpdated > 0 && (now - global.ubaCache.lastUpdated < 15 * 60 * 1000);
+
+    // ⚡ 1. FAST PATH: RAM CACHE
+    if (isCacheFresh && global.ubaCache.attendance && global.ubaCache.attendance.length > 0) {
+      const myScans = global.ubaCache.attendance.filter(a => a.vtuNumber === vtu);
       
-      try {
-        const meetingDoc = await db.collection("meetings").doc(record.meetingId).get();
-        if (meetingDoc.exists) {
-          const mData = meetingDoc.data();
-          meetingTitle = mData.title || "Field Session";
-          coordinatorName = mData.createdByName || mData.coordinatorId || "Coordinator";
-        }
-      } catch (err) {}
+      const history = myScans.map(scan => {
+        const meeting = (global.ubaCache.meetings || []).find(m => m.id === scan.meetingId) || {};
+        return { ...scan, meetingTitle: meeting.title || 'Unknown Session', coordinatorName: meeting.createdByName || 'System' };
+      });
 
-      return {
-        ...record,
-        meetingTitle,
-        coordinatorName
-      };
-    }));
+      console.log(`⚡ ZERO-READ: Served ${history.length} scans for ${vtu} from RAM.`);
+      return res.json({ success: true, history: history, leaderboard: [] });
+    }
 
-    enrichedHistory.sort((a, b) => {
-      const timeA = a.timestamp?.seconds ? a.timestamp.seconds * 1000 : (a.timestamp || 0);
-      const timeB = b.timestamp?.seconds ? b.timestamp.seconds * 1000 : (b.timestamp || 0);
-      return timeB - timeA;
-    });
-
-    const allAttendance = await db.collection("attendance").get();
-    const counts = {};
-    allAttendance.docs.forEach(doc => {
-      const data = doc.data();
-      counts[data.vtuNumber] = (counts[data.vtuNumber] || 0) + 1;
-    });
-
-    const leaderboard = Object.keys(counts).map(vtuNum => ({
-      vtuNumber: vtuNum,
-      count: counts[vtuNum]
-    })).sort((a, b) => b.count - a.count);
-
-    res.json({ history: enrichedHistory, leaderboard });
+    // 🐢 2. SLOW PATH (FAIL-SAFE): Firebase Fallback
+    console.log(`🐢 History RAM Miss for ${vtu}. Hitting Firebase...`);
+    const snap = await db.collection("attendance").where("vtuNumber", "==", vtu).get();
+    const history = snap.docs.map(doc => doc.data());
+    
+    return res.json({ success: true, history: history, leaderboard: [] });
   } catch (error) {
-    console.error("History Fetch Error:", error);
-    res.status(500).send();
+    res.status(500).json({ success: false, message: "Failed to fetch history" });
   }
 };
