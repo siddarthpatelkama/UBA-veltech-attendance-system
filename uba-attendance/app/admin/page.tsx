@@ -1003,57 +1003,6 @@ export default function AdminPage() {
               </div>
 
               <div className="grid lg:grid-cols-12 gap-8">
-                {/* 📡 THE BROADCAST CENTER */}
-                <div className="bg-[#111827] rounded-[2.5rem] p-6 md:p-8 shadow-2xl border border-gray-800 mb-6 animate-in slide-in-from-top-4 relative overflow-hidden">
-                  <div className="absolute top-0 right-0 p-8 opacity-10 pointer-events-none text-9xl">📡</div>
-                  <h2 className="font-black text-xl text-white uppercase tracking-widest mb-4">Broadcast Center</h2>
-                  <div className="flex flex-col md:flex-row gap-4 relative z-10">
-                    <div className="flex-grow space-y-4">
-                      <input 
-                        type="text" 
-                        placeholder="Title (e.g. Bus Leaving!)" 
-                        id="broadcastTitle"
-                        className="w-full bg-gray-800/50 border border-gray-700 text-white rounded-xl p-4 font-bold outline-none focus:border-[#FF5722] placeholder-gray-500" 
-                      />
-                      <textarea 
-                        placeholder="Message content..." 
-                        id="broadcastMessage"
-                        rows={2}
-                        className="w-full bg-gray-800/50 border border-gray-700 text-white rounded-xl p-4 font-bold outline-none focus:border-[#FF5722] placeholder-gray-500 resize-none" 
-                      />
-                    </div>
-                    <div className="flex flex-col gap-4 min-w-[200px]">
-                      <select id="broadcastTarget" className="bg-gray-800/50 border border-gray-700 text-white rounded-xl p-4 font-bold outline-none focus:border-[#FF5722]">
-                        <option value="all_students">All Students</option>
-                        <option value="year_1">Year 1 Only</option>
-                        <option value="year_2">Year 2 Only</option>
-                        <option value="year_3">Year 3 Only</option>
-                        <option value="year_4">Year 4 Only</option>
-                        <option value="coordinators">Coordinators Only</option>
-                      </select>
-                      <button 
-                        onClick={async () => {
-                          const title = (document.getElementById('broadcastTitle') as HTMLInputElement).value;
-                          const body = (document.getElementById('broadcastMessage') as HTMLTextAreaElement).value;
-                          const target = (document.getElementById('broadcastTarget') as HTMLSelectElement).value;
-                          if(!title || !body) return alert("Title and Message required!");
-                          const token = await auth.currentUser?.getIdToken();
-                          await fetch(`${API_URL}/admin/broadcast`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                            body: JSON.stringify({ targetTopic: target, title, body })
-                          });
-                          alert("Broadcast Sent! 🚀");
-                          (document.getElementById('broadcastTitle') as HTMLInputElement).value = '';
-                          (document.getElementById('broadcastMessage') as HTMLTextAreaElement).value = '';
-                        }}
-                        className="w-full h-full bg-[#FF5722] text-white font-black rounded-xl uppercase tracking-widest shadow-lg hover:bg-orange-600 transition active:scale-95"
-                      >
-                        {isProcessing ? 'Transmitting to Server...' : 'FIRE NOTIFICATION 🚀'}
-                      </button>
-                    </div>
-                  </div>
-                </div>
                 {/* EVENTS COLUMN */}
                 <div className="lg:col-span-8 space-y-6">
                   <div className="p-4 rounded-2xl border border-[#FF5722]/30 flex flex-col md:flex-row gap-4 bg-[#FFF9F5] shadow-sm">
