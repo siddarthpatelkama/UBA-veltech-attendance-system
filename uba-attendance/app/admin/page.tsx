@@ -217,8 +217,8 @@ export default function AdminPage() {
     return (data.users || []).map((u: any) => ({
       ...u,
       eventsAttended: attendanceMap[u.vtuNumber] || 0,
-      // 🛡️ SAFEGUARD: If isGuest isn't explicitly set to false, force them to be a guest.
-      isGuest: u.isGuest !== false 
+      // 🛡️ FIX: If they are in the list, assume they are members unless isGuest is EXACTLY true
+      isGuest: u.isGuest === true 
     })).filter((u: any) => {
       // 1. Tab Filter
       if (crmTab === 'members' && u.isGuest) return false;
@@ -227,8 +227,6 @@ export default function AdminPage() {
       if (crmFilters.gender !== 'All' && u.gender !== crmFilters.gender) return false;
       // 3. Year Filter
       if (crmFilters.year !== 'All' && String(u.year) !== crmFilters.year) return false;
-      // 4. Events Filter
-      if (u.eventsAttended < crmFilters.minEvents) return false;
       return true;
     }).sort((a: any, b: any) => b.eventsAttended - a.eventsAttended);
   }, [data.users, data.attendance, crmTab, crmFilters]);
@@ -1334,7 +1332,7 @@ export default function AdminPage() {
   {crmUsers
     .filter((u: any) => {
       const s = vtuLookup.toLowerCase();
-      // TRUE SEARCH: Matches against VTU, Name, or Dept
+      // ⚡ IMPROVED SEARCH: Matches anywhere in VTU, Name, or Dept
       return !s || 
              String(u.vtuNumber).toLowerCase().includes(s) || 
              (u.name || '').toLowerCase().includes(s) || 
@@ -1361,7 +1359,11 @@ export default function AdminPage() {
          </td>
          <td className="p-4 text-right">
             <button 
-              onClick={() => executeCrmAction(crmTab === 'guests' ? '/admin/crm/promote' : '/admin/crm/demote', { vtu: u.vtuNumber }, "Roster Updated!")}
+              onClick={() => executeCrmAction(
+                crmTab === 'guests' ? '/admin/promote-member' : '/admin/demote-guest',
+                { vtu: u.vtuNumber },
+                "Roster Updated!"
+              )}
               className={`px-4 py-2 rounded-xl font-black text-[9px] uppercase tracking-widest active:scale-95 transition-all ${crmTab === 'guests' ? 'bg-green-600 text-white shadow-md' : 'bg-red-50 text-red-500'}`}
             >
               {crmTab === 'guests' ? 'Promote' : 'Demote'}
