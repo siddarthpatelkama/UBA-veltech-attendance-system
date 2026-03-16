@@ -2,6 +2,9 @@
 
 import { useEffect } from "react";
 import "./globals.css";
+import { Analytics } from "@vercel/analytics/react";
+import { SpeedInsights } from "@vercel/speed-insights/next";
+import PushNotifications from "./components/PushNotifications"; // ⚡ ADD THIS
 
 // Metadata Configuration (ADDED SEO FIELDS HERE)
 const metadataValues = {
@@ -68,6 +71,10 @@ export default function RootLayout({
         <main className="flex-1">
           {children}
         </main>
+
+        <Analytics />
+        <SpeedInsights />
+        <PushNotifications /> {/* ⚡ ADD THIS TO RUN ON EVERY PAGE */}
 
         {/* GLOBAL DEVELOPER FOOTER */}
         <footer className="bg-[#FFF9F5] border-t border-[#FF5722]/20 py-8 mt-auto">

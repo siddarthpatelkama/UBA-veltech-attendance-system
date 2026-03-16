@@ -113,7 +113,7 @@ export default function AdminPage() {
   const [exportFilters, setExportFilters] = useState({ year: 'All', status: 'All' });
 
   // Event Scheduling States
-  const [scheduleForm, setScheduleForm] = useState({ title: '', date: '', time: '', venue: '', targetAudience: [] as string[] });
+  const [scheduleForm, setScheduleForm] = useState({ title: '', date: '', time: '', venue: '', type: 'standard', targetAudience: [] as string[] });
   const [scheduleManifest, setScheduleManifest] = useState<any[]>([]);
 
   // CRM States
@@ -216,7 +216,9 @@ export default function AdminPage() {
 
     return (data.users || []).map((u: any) => ({
       ...u,
-      eventsAttended: attendanceMap[u.vtuNumber] || 0
+      eventsAttended: attendanceMap[u.vtuNumber] || 0,
+      // 🛡️ SAFEGUARD: If isGuest isn't explicitly set to false, force them to be a guest.
+      isGuest: u.isGuest !== false 
     })).filter((u: any) => {
       // 1. Tab Filter
       if (crmTab === 'members' && u.isGuest) return false;
@@ -225,7 +227,7 @@ export default function AdminPage() {
       if (crmFilters.gender !== 'All' && u.gender !== crmFilters.gender) return false;
       // 3. Year Filter
       if (crmFilters.year !== 'All' && String(u.year) !== crmFilters.year) return false;
-      // 4. Events Filter (Ghost vs Active)
+      // 4. Events Filter
       if (u.eventsAttended < crmFilters.minEvents) return false;
       return true;
     }).sort((a: any, b: any) => b.eventsAttended - a.eventsAttended);
@@ -264,7 +266,12 @@ export default function AdminPage() {
       const res = await fetch(`${API_URL}/admin/reset-device`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ email })
       });
-      if (res.ok) { showToast("Device lock reset!"); fetchData(true); setSelectedStudent(null); }
+      if (res.ok) {
+        showToast("Device lock reset!");
+        localStorage.removeItem('uba_master_roster'); // ⚡ KILLS THE STALE CACHE
+        fetchData(true);
+        setSelectedStudent(null);
+      }
     } catch (e) { showToast("Network error."); }
   };
 
@@ -459,7 +466,7 @@ export default function AdminPage() {
     });
     if (res.ok) {
       showToast("Event Scheduled Successfully!");
-      setScheduleForm({ title: '', date: '', time: '', venue: '', targetAudience: [] });
+      setScheduleForm({ title: '', date: '', time: '', venue: '', type: 'standard', targetAudience: [] });
       setScheduleManifest([]);
       if (scheduleFileRef.current) scheduleFileRef.current.value = '';
       fetchData(true);
@@ -491,6 +498,7 @@ export default function AdminPage() {
       
       if (res.ok) {
         showToast(successMsg);
+        localStorage.removeItem('uba_master_roster'); // ⚡ KILLS THE STALE CACHE
         fetchData(true); // REFRESH the list immediately
       } else {
         const errorData = await res.json();
@@ -1296,7 +1304,11 @@ export default function AdminPage() {
                       if(confirm("🚨 DANGER: This will force EVERY student to re-link their phones. Proceed?")) {
                         const token = await auth.currentUser?.getIdToken();
                         const res = await fetch(`${API_URL}/admin/global-device-reset`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }});
-                        if(res.ok) alert("All devices unlinked! 🔓");
+                        if(res.ok) {
+                          alert("All devices unlinked! 🔓");
+                          localStorage.removeItem('uba_master_roster'); // ⚡ KILLS THE STALE CACHE
+                          fetchData(true);
+                        }
                       }
                     }}
                     className="px-4 py-2 bg-red-600 text-white rounded-lg font-black text-[9px] uppercase tracking-widest hover:bg-red-700 active:scale-95 transition-all shadow-lg"
@@ -1389,7 +1401,13 @@ export default function AdminPage() {
                   <input type="time" value={scheduleForm.time} onChange={e => setScheduleForm({...scheduleForm, time: e.target.value})} className="flex-1 p-4 rounded-xl outline-none font-bold text-sm bg-white shadow-sm border border-orange-100 text-gray-600" />
                 </div>
 
-                <input type="text" placeholder="Venue (Optional)" value={scheduleForm.venue} onChange={e => setScheduleForm({...scheduleForm, venue: e.target.value})} className="w-full p-4 rounded-xl mb-6 outline-none font-bold text-sm bg-white shadow-sm border border-orange-100" />
+
+                {/* ⚡ NEW EVENT TYPE TOGGLE ⚡ */}
+                <p className="text-[10px] font-black uppercase tracking-widest text-gray-400 mb-3">Event Type</p>
+                <div className="flex gap-3 mb-6">
+                  <button onClick={() => setScheduleForm({...scheduleForm, type: 'standard'})} className={`flex-1 py-4 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all ${scheduleForm.type === 'standard' ? 'bg-[#111827] text-white shadow-lg' : 'bg-white border-2 border-gray-100 text-gray-500 hover:bg-gray-50'}`}>Standard Event</button>
+                  <button onClick={() => setScheduleForm({...scheduleForm, type: 'verifiable'})} className={`flex-1 py-4 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all ${scheduleForm.type === 'verifiable' ? 'bg-[#FF5722] text-white shadow-lg' : 'bg-white border-2 border-orange-100 text-orange-400 hover:bg-orange-50'}`}>Verifiable (Trip)</button>
+                </div>
 
                 <p className="text-[10px] font-black uppercase tracking-widest text-gray-400 mb-3">Target Audience (Leave blank for all)</p>
                 <div className="flex gap-3 mb-6">

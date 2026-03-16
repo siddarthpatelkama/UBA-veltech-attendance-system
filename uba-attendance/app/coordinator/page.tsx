@@ -1468,21 +1468,26 @@ export default function CoordinatorPage() {
                         
                         <div className="flex-grow overflow-y-auto max-h-[300px] custom-scrollbar px-2 pb-4">
                           {activeTab === 'verified' && (
-                            <div className="grid md:grid-cols-2 gap-3">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                               {tabVerified.map((at, i) => (
-                                 <div key={i} className="p-4 rounded-2xl border border-gray-100 bg-[#FFF9F5]/30 flex justify-between items-center shadow-sm group hover:border-red-200 transition-all">
+                                 <div key={i} className="p-3 rounded-xl border border-gray-200 bg-white flex justify-between items-center shadow-sm group hover:border-orange-300 transition-all">
                                    <div onClick={() => setSelectedStudent({studentName: at.studentName, vtuNumber: at.vtuNumber || at.vtu})} className="cursor-pointer flex-grow">
-                                     <p className="font-bold text-sm text-gray-900">{at.studentName || 'Unknown'}</p>
-                                     <p className="text-[10px] font-mono font-bold text-[#FF5722]">{at.vtuNumber || at.vtu}</p>
+                                     <p className="font-black text-[15px] text-gray-900 truncate">{at.studentName || 'Unknown'}</p>
+                                     <p className="text-[10px] font-mono font-black text-[#FF5722]">{at.vtuNumber || at.vtu}</p>
                                    </div>
                                    <div className="flex items-center gap-2">
                                      <span className="text-[9px] font-black text-gray-400">
-                                       {new Date(at.timestamp).toLocaleString('en-IN', {
-                                         timeZone: 'Asia/Kolkata',
-                                         hour: '2-digit',
-                                         minute: '2-digit',
-                                         hour12: true
-                                       })}
+                                       {/* Bulletproof time formatter */}
+                                       {(() => {
+                                         const t = getSafeTime(at.timestamp);
+                                         if (!t) return 'Invalid Date';
+                                         return new Date(t).toLocaleString('en-IN', {
+                                           timeZone: 'Asia/Kolkata',
+                                           hour: '2-digit',
+                                           minute: '2-digit',
+                                           hour12: true
+                                         });
+                                       })()}
                                      </span>
                                      <button 
                                        onClick={(e) => { e.stopPropagation(); if(confirm(`Remove ${at.vtuNumber || at.vtu}?`)) handleLocalRemove(at.vtuNumber || at.vtu); }}

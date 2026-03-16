@@ -150,14 +150,18 @@ exports.createPhase = async (req, res) => {
       attendanceActive: true
     });
     
-    // --- FCM Trigger 2: Phase Live Broadcast ---
-        await onesignal.sendNotification(
-      `meeting_${meetingId}`, // Subscribers to this specific event
-      `🔴 SESSION LIVE`,
-      `${phaseTitle} has started! Open your app to scan the QR code.`,
-      { type: 'live', meetingId: meetingId, phaseId: newPhase.id }
-    );
-    // ---------------------------------------------
+    // --- SAFE PUSH NOTIFICATION BLOCK ---
+    try {
+      await onesignal.sendNotification(
+        `meeting_${meetingId}`,
+        `🔴 SESSION LIVE`,
+        `${phaseTitle} has started! Open your app to scan the QR code.`,
+        { type: 'live', meetingId: meetingId, phaseId: newPhase.id }
+      );
+    } catch (pushError) {
+      console.log("⚠️ Phase Live notification failed, but phase was created successfully.", pushError.message);
+    }
+    // ------------------------------------
 
     if (global.ubaCache) global.ubaCache.lastUpdated = 0;
     return res.json({ success: true });
@@ -500,7 +504,7 @@ exports.scheduleMeeting = async (req, res) => {
       return res.status(403).json({ success: false, message: "Access denied." });
     }
 
-    const { title, date, time, venue, targetAudience, manifest } = req.body;
+    const { title, date, time, venue, targetAudience, manifest, type } = req.body;
     if (!title || !date) return res.status(400).json({ success: false, message: "Title and Date required" });
 
     const meetingData = {
@@ -511,7 +515,7 @@ exports.scheduleMeeting = async (req, res) => {
       targetAudience: targetAudience || [], // Array like ["2", "3"]
       manifest: manifest || [], // Expected CSV roster
       status: "scheduled",
-      type: "verifiable",
+      type: type || "standard", // ⚡ NOW GRABS THE TYPE FROM FRONTEND
       attendanceActive: false,
       coordinatorId: req.user.email,
       createdByName: req.user.name || req.user.email.split('@')[0],
@@ -519,21 +523,21 @@ exports.scheduleMeeting = async (req, res) => {
     };
 
     const docRef = await db.collection("meetings").add(meetingData);
-    
-    // --- FCM Trigger 1: Scheduled Event Broadcast ---
-    // If targetAudience is specified, alert those years. Otherwise, alert everyone.
-    const targetTopics = (targetAudience && targetAudience.length > 0) ? targetAudience.map(y => `year_${y}`) : ['all_students'];
-    
-    for (const topic of targetTopics) {
-      await fcm.sendNotification(
-        topic,
-        `🗓️ New Event: ${title}`,
-        `Scheduled for ${date} at ${venue || 'TBA'}. Check your app for details.`,
-        { type: 'scheduled', meetingId: docRef.id }
-      );
+    // --- SAFE PUSH NOTIFICATION BLOCK ---
+    try {
+      const targetTopics = (targetAudience && targetAudience.length > 0) ? targetAudience.map(y => `year_${y}`) : ['all_students'];
+      for (const topic of targetTopics) {
+        await onesignal.sendNotification(
+          topic,
+          `🗓️ New Event: ${title}`,
+          `Scheduled for ${date} at ${venue || 'TBA'}. Check your app for details.`,
+          { type: 'scheduled', meetingId: docRef.id }
+        );
+      }
+    } catch (pushError) {
+      console.log("⚠️ Push notification failed, but meeting was created successfully.", pushError.message);
     }
-    // ------------------------------------------------
-
+    // ------------------------------------
     return res.status(201).json({ success: true, meetingId: docRef.id });
   } catch (error) {
     console.error("Schedule Error:", error);
@@ -611,6 +615,18 @@ exports.activateScheduledMeeting = async (req, res) => {
       startTime: Date.now()
     });
 
+    // --- SAFE PUSH NOTIFICATION BLOCK ---
+    try {
+      await onesignal.sendNotification(
+        `meeting_${meetingId}`,
+        `🔴 SESSION ACTIVATED`,
+        `Session is now live! Open your app to scan the QR code.`,
+        { type: 'activated', meetingId }
+      );
+    } catch (pushError) {
+      console.log("⚠️ Activate notification failed, but session started safely.", pushError.message);
+    }
+    // ------------------------------------
     if (global.ubaCache) global.ubaCache.lastUpdated = 0; // Clear Cache
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: "Activation failed" }); }

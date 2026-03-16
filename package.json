@@ -1,12 +1,15 @@
 {
   "dependencies": {
+    "@vercel/analytics": "^2.0.1",
+    "@vercel/speed-insights": "^2.0.0",
     "crypto-js": "^4.2.0",
     "html5-qrcode": "^2.3.8",
     "leaflet": "^1.9.4",
     "next-pwa": "^5.2.4",
     "onesignal-cordova-plugin": "^5.3.3",
     "qrcode.react": "^4.2.0",
-    "react-leaflet": "^5.0.0"
+    "react-leaflet": "^5.0.0",
+    "react-onesignal": "^3.5.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.18",

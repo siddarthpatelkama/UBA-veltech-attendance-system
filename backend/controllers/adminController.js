@@ -92,26 +92,32 @@ exports.promoteToMember = async (req, res) => {
 exports.demoteToGuest = async (req, res) => {
   const { vtu } = req.body;
   try {
+    const batch = db.batch();
+
+    // 1. Remove them from the Official Master Roster
     const masterRef = db.collection("master_roster").doc(vtu);
-    const masterDoc = await masterRef.get();
-    
-    if (!masterDoc.exists) return res.status(404).json({ error: "Student not found in Master Roster" });
+    batch.delete(masterRef);
 
-    const studentData = masterDoc.data();
+    // 2. Update their App Profile so it instantly says "Registered Guest"
+    const usersRef = db.collection("users");
+    const userQuery = await usersRef.where("vtuNumber", "==", vtu).get();
 
-    // Back to temporary roster & Set Guest status
-    await db.collection("temporary_roster").doc(vtu).set({
-      ...studentData,
-      isGuest: true,
-      demotedAt: Date.now()
-    });
+    if (!userQuery.empty) {
+      batch.update(userQuery.docs[0].ref, { 
+        isGuest: true, 
+        demotedAt: Date.now() 
+      });
+    }
 
-    await masterRef.delete();
+    await batch.commit();
+
+    // 3. Trip the wire to force the RAM Cache to refresh!
     if (global.ubaCache) global.ubaCache.lastUpdated = 0;
 
-    res.json({ success: true, message: "Demoted to Guest status" });
+    res.json({ success: true, message: "Demoted to Guest status 🛑" });
   } catch (error) {
-    res.status(500).json({ error: "Demotion failed" });
+    console.error("Demote Error:", error);
+    res.status(500).json({ error: "Demotion failed. Check server logs." });
   }
 };
 // --- ADMIN BROADCAST CENTER & HISTORY ---
