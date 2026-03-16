@@ -13,6 +13,8 @@
     "@capacitor/cli": "^8.1.0",
     "@capacitor/core": "^8.1.0",
     "@codetrix-studio/capacitor-google-auth": "^3.4.0-rc.4",
+    "@vercel/analytics": "^2.0.1",
+    "@vercel/speed-insights": "^2.0.0",
     "axios": "^1.13.5",
     "canvas-confetti": "^1.9.4",
     "crypto-js": "^4.2.0",
@@ -25,6 +27,7 @@
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-leaflet": "^5.0.0",
+    "react-onesignal": "^3.5.1",
     "react-qr-code": "^2.0.18"
   },
   "devDependencies": {
