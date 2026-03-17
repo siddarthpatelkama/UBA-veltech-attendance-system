@@ -101,6 +101,27 @@ export default function AdminPage() {
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [greeting, setGreeting] = useState('');
   
+  // Activate Scheduled Meeting
+  const handleActivateScheduled = async (targetId: string) => {
+    setIsProcessing(true);
+    const token = await auth.currentUser?.getIdToken();
+    try {
+      const res = await fetch(`${API_URL}/meeting/activate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ meetingId: targetId })
+      });
+      if (res.ok) {
+        showToast("Scheduled Session is now LIVE! 🔴");
+        fetchData(true);
+      } else {
+        showToast("Failed to activate session.");
+      }
+    } catch (e) {
+      showToast("Network error.");
+    }
+    setIsProcessing(false);
+  };
   const [showAllMeetings, setShowAllMeetings] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [isPurging, setIsPurging] = useState(false);
@@ -1053,6 +1074,9 @@ export default function AdminPage() {
                        <button onClick={() => setAnalyticsViewMap({...analyticsViewMap, [m.id]: !isAnalytics})} className={`px-3 py-2 rounded-lg text-[9px] font-black border transition uppercase shadow-sm tracking-widest ${isAnalytics ? 'bg-gray-900 text-white border-gray-900' : 'text-[#FF5722] border-[#FF5722]/30 bg-orange-50 hover:bg-orange-100'}`}>{isAnalytics ? 'Close Analytics' : 'Analytics'}</button>
                        <button onClick={() => downloadMeetingCSV(m.id, m.title)} className="px-3 py-2 rounded-lg text-[9px] font-black border border-gray-200 hover:bg-gray-50 shadow-sm uppercase tracking-widest text-gray-700">Export</button>
                        <button onClick={() => handleDeleteMeeting(m.id, m.isSOS)} className="px-3 py-2 rounded-lg text-[9px] bg-red-50 font-black text-red-600 hover:bg-red-500 hover:text-white transition shadow-sm border border-red-100 uppercase tracking-widest">Archive</button>
+                         <button onClick={() => handleActivateScheduled(m.id)} disabled={isProcessing} className="bg-[#FF5722] text-white px-8 py-4 rounded-2xl font-black uppercase tracking-widest shadow-xl hover:bg-[#E64A19] hover:-translate-y-1 transition-all disabled:opacity-50">
+                           {isProcessing ? 'Starting...' : 'Start Session Now'}
+                         </button>
                      </div>
                   </div>
 

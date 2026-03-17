@@ -556,13 +556,17 @@ export default function CoordinatorPage() {
   };
 
   const handleActivateScheduled = async () => {
+    // ⚡ GRAB THE CORRECT ID, EVEN IF NULL
+    const targetId = selectedMeetingId || (meetings.length > 0 ? meetings[0].id : null);
+    if (!targetId) return;
+
     setIsProcessing(true);
     const token = await auth.currentUser?.getIdToken();
     try {
       const res = await fetch(`${API_URL}/meeting/activate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ meetingId: selectedMeetingId })
+        body: JSON.stringify({ meetingId: targetId }) // ⚡ USE targetId HERE
       });
       if (res.ok) {
         showToast("Scheduled Session is now LIVE! 🔴");
