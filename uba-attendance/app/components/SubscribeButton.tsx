@@ -9,14 +9,12 @@ interface SubscribeProps {
   role: string;
 }
 
-// ⚡ Global flag to fix the VS Code 'initialized' error
 let isOneSignalInit = false;
 
 export default function SubscribeButton({ vtu, year, dept, role }: SubscribeProps) {
   const [isVisible, setIsVisible] = useState(true);
 
   useEffect(() => {
-    // Hide if already enabled
     if (localStorage.getItem('uba_alerts_enabled') === 'true') {
       setIsVisible(false);
       return;
@@ -24,20 +22,14 @@ export default function SubscribeButton({ vtu, year, dept, role }: SubscribeProp
 
     const startOneSignal = async () => {
       try {
-        const isNative = typeof window !== 'undefined' && (window as any).Capacitor?.isNativePlatform();
+        const isNative = typeof window !== 'undefined' && !!(window as any).Capacitor?.isNativePlatform();
 
-        if (isNative) {
-          // 📱 NATIVE ANDROID/IOS INIT
-          const OneSignalNative = (window as any).plugins?.OneSignal;
-          if (OneSignalNative) {
-            OneSignalNative.initialize("19e04964-ec0f-44c4-a1df-e56989f568f8");
-          }
-        } else {
-          // 🌐 WEB BROWSER INIT (Fixes the VS Code error)
+        if (!isNative) {
+          // 🌐 WEB BROWSER INIT
           if (!isOneSignalInit) {
             await OneSignalWeb.init({
               appId: "19e04964-ec0f-44c4-a1df-e56989f568f8",
-              allowLocalhostAsSecureOrigin: true,
+              allowLocalhostAsSecureOrigin: true
             });
             isOneSignalInit = true;
           }
@@ -52,7 +44,7 @@ export default function SubscribeButton({ vtu, year, dept, role }: SubscribeProp
 
   const handleSubscribe = async () => {
     try {
-      const isNative = typeof window !== 'undefined' && (window as any).Capacitor?.isNativePlatform();
+      const isNative = typeof window !== 'undefined' && !!(window as any).Capacitor?.isNativePlatform();
 
       if (isNative) {
         // 📱 NATIVE ANDROID/IOS PROMPT
@@ -71,27 +63,30 @@ export default function SubscribeButton({ vtu, year, dept, role }: SubscribeProp
           }
         }
       } else {
-        // 🌐 WEB BROWSER PROMPT
-        await OneSignalWeb.Slidedown.promptPush();
+        // 🌐 WEB BROWSER PROMPT (THE BULLETPROOF BYPASS)
         
-        // ⚡ Add tags immediately (OneSignal securely queues them)
-        OneSignalWeb.User.addTags({
-          vtu: String(vtu).toUpperCase(),
-          year: String(year),
-          dept: String(dept).toUpperCase(),
-          role: String(role).toLowerCase()
-        });
+        // 1. Ask the browser directly for permission (This bypasses the OneSignal bug)
+        const permission = await window.Notification.requestPermission();
+        
+        if (permission === "granted") {
+          // 2. If they click Allow, silently tag them in OneSignal
+          OneSignalWeb.User.addTags({
+            vtu: String(vtu).toUpperCase(),
+            year: String(year),
+            dept: String(dept).toUpperCase(),
+            role: String(role).toLowerCase()
+          });
 
-        // ⚡ Bypass the OneSignal bug by asking the Browser directly if it's allowed!
-        setTimeout(() => {
-          if (window.Notification && Notification.permission === "granted") {
-            localStorage.setItem('uba_alerts_enabled', 'true'); 
-            setIsVisible(false);
-          }
-        }, 3500);
+          // 3. Hide the button forever
+          localStorage.setItem('uba_alerts_enabled', 'true'); 
+          setIsVisible(false);
+        } else {
+          alert("You blocked notifications! Please allow them in your browser settings (click the lock icon next to the URL).");
+        }
       }
     } catch (error) {
-      alert("Could not start notifications. Check your device settings!");
+      console.error(error);
+      alert("Could not start notifications. Please check your browser settings.");
     }
   };
 
@@ -110,5 +105,5 @@ export default function SubscribeButton({ vtu, year, dept, role }: SubscribeProp
         🔔 Turn On Alerts
       </button>
     </div>
- );
+  );
 }
