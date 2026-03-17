@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from 'react';
+import OneSignalWeb from 'react-onesignal';
 
 interface SubscribeProps {
   vtu: string;
@@ -8,54 +9,92 @@ interface SubscribeProps {
   role: string;
 }
 
+// ⚡ Global flag to fix the VS Code 'initialized' error
+let isOneSignalInit = false;
+
 export default function SubscribeButton({ vtu, year, dept, role }: SubscribeProps) {
-  // ⚡ FORCE DEFAULT TO TRUE: It will always render unless proven otherwise
   const [isVisible, setIsVisible] = useState(true);
 
   useEffect(() => {
-    // 1. If we know they already did this, hide immediately
+    // Hide if already enabled
     if (localStorage.getItem('uba_alerts_enabled') === 'true') {
       setIsVisible(false);
       return;
     }
 
-    // 2. Setup a loop to watch for OneSignal status changes
-    const interval = setInterval(() => {
-      if (typeof window !== 'undefined' && (window as any).OneSignal) {
-        const optedIn = (window as any).OneSignal.User?.PushSubscription?.optedIn;
-        if (optedIn) {
-          localStorage.setItem('uba_alerts_enabled', 'true');
-          setIsVisible(false); // Hide the button
-          clearInterval(interval); // Stop checking
-        }
-      }
-    }, 2000); // Checks every 2 seconds
+    const startOneSignal = async () => {
+      try {
+        const isNative = typeof window !== 'undefined' && (window as any).Capacitor?.isNativePlatform();
 
-    return () => clearInterval(interval);
+        if (isNative) {
+          // 📱 NATIVE ANDROID/IOS INIT
+          const OneSignalNative = (window as any).plugins?.OneSignal;
+          if (OneSignalNative) {
+            OneSignalNative.initialize("19e04964-ec0f-44c4-a1df-e56989f568f8");
+          }
+        } else {
+          // 🌐 WEB BROWSER INIT (Fixes the VS Code error)
+          if (!isOneSignalInit) {
+            await OneSignalWeb.init({
+              appId: "19e04964-ec0f-44c4-a1df-e56989f568f8",
+              allowLocalhostAsSecureOrigin: true,
+            });
+            isOneSignalInit = true;
+          }
+        }
+      } catch (err) {
+        console.warn("OneSignal Init Skipped", err);
+      }
+    };
+    
+    startOneSignal();
   }, []);
 
   const handleSubscribe = async () => {
     try {
-      if (typeof window !== 'undefined' && (window as any).OneSignal) {
-        const OneSignal = (window as any).OneSignal;
+      const isNative = typeof window !== 'undefined' && (window as any).Capacitor?.isNativePlatform();
+
+      if (isNative) {
+        // 📱 NATIVE ANDROID/IOS PROMPT
+        const OneSignalNative = (window as any).plugins?.OneSignal;
+        if (OneSignalNative) {
+          const hasPermission = await OneSignalNative.Notifications.requestPermission(true);
+          
+          if (hasPermission) {
+            OneSignalNative.User.addTag("vtu", String(vtu).toUpperCase());
+            OneSignalNative.User.addTag("year", String(year));
+            OneSignalNative.User.addTag("dept", String(dept).toUpperCase());
+            OneSignalNative.User.addTag("role", String(role).toLowerCase());
+            
+            localStorage.setItem('uba_alerts_enabled', 'true');
+            setIsVisible(false);
+          }
+        }
+      } else {
+        // 🌐 WEB BROWSER PROMPT
+        await OneSignalWeb.Slidedown.promptPush();
         
-        // 1. Trigger the prompt
-        await OneSignal.Slidedown.promptPush();
-        
-        // 2. Tag them instantly
-        OneSignal.User.addTags({
+        // ⚡ Add tags immediately (OneSignal securely queues them)
+        OneSignalWeb.User.addTags({
           vtu: String(vtu).toUpperCase(),
           year: String(year),
           dept: String(dept).toUpperCase(),
           role: String(role).toLowerCase()
         });
+
+        // ⚡ Bypass the OneSignal bug by asking the Browser directly if it's allowed!
+        setTimeout(() => {
+          if (window.Notification && Notification.permission === "granted") {
+            localStorage.setItem('uba_alerts_enabled', 'true'); 
+            setIsVisible(false);
+          }
+        }, 3500);
       }
     } catch (error) {
-      console.error("Subscription error:", error);
+      alert("Could not start notifications. Check your device settings!");
     }
   };
 
-  // If hidden, render nothing
   if (!isVisible) return null;
 
   return (
