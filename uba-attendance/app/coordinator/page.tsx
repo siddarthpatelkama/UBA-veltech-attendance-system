@@ -7,6 +7,7 @@ import { auth } from '@/lib/firebase';
 import { signOut } from 'firebase/auth';
 import QRCode from 'react-qr-code';
 import CryptoJS from 'crypto-js';
+import SubscribeButton from '../components/SubscribeButton';
 
 const LeafletMap = dynamic(() => import('../components/MapBox'), { ssr: false });
 
@@ -1181,6 +1182,15 @@ export default function CoordinatorPage() {
         )}
 
         <main className="max-w-7xl mx-auto p-4 md:p-6 mt-4 flex flex-col lg:grid lg:grid-cols-12 gap-8">
+                    {/* ⚡ THE NOTIFICATION BUTTON ⚡ */}
+                    <div className="lg:col-span-12 w-full">
+                      <SubscribeButton 
+                        vtu={currentUserData.vtuNumber || myNameRaw || 'COORD'} 
+                        year={currentUserData.year || 'STAFF'} 
+                        dept={currentUserData.dept || 'COORD'} 
+                        role="coordinator" 
+                      />
+                    </div>
           
           {/* EMERGENCY RECOVERY BANNER */}
           {unsyncedEmergencyData.length > 0 && (
@@ -1551,7 +1561,7 @@ export default function CoordinatorPage() {
                                      <p className="text-[10px] font-mono font-bold text-gray-500">{at.vtuNumber || at.vtu}</p>
                                    </div>
                                    <div className="flex items-center gap-2">
-                                     <div className="text-right"><p className="text-[8px] bg-gray-800 text-white px-2 py-1 rounded font-black uppercase tracking-widest mb-1">{at.overrideCategory || 'Manual'}</p><p className="text-[8px] font-bold text-gray-400">{at.enteredBy?.split('@')[0]}</p></div>
+                                     <div className="text-right"><p className="text-[8px] bg-orange-500 text-white px-2 py-1 rounded font-black uppercase tracking-widest mb-1 inline-block">{at.overrideCategory || 'Manual'}</p><p className="text-[8px] font-bold text-orange-400 italic block truncate w-16">By {at.enteredBy?.split('@')[0]}</p></div>
                                      <button 
                                        onClick={(e) => { e.stopPropagation(); if(confirm(`Remove ${at.vtuNumber || at.vtu}?`)) handleLocalRemove(at.vtuNumber || at.vtu); }}
                                        className="ml-2 p-2 bg-red-50 text-red-600 rounded-xl opacity-0 group-hover:opacity-100 active:scale-90 transition-all shadow-sm border border-red-100"
@@ -1685,16 +1695,19 @@ export default function CoordinatorPage() {
       {/* STUDENT DOSSIER MODAL */}
       {selectedStudent && (() => {
         const masterRoster = JSON.parse(localStorage.getItem('uba_master_roster') || '[]');
+        // Normalize VTU for matching
+        const normalizeVTU = (vtu: any) => String(vtu).replace(/\D/g, '');
         const vtu = selectedStudent.vtuNumber || selectedStudent.vtu;
-        const studentContact = masterRoster.find((u:any) => String(u.vtuNumber) === String(vtu)) || selectedStudent;
-        
+        const normVTU = normalizeVTU(vtu);
+        const studentContact = masterRoster.find((u:any) => normalizeVTU(u.vtuNumber) === normVTU) || selectedStudent;
+
         // Check current meeting manifest in case they are from CSV upload
         const currentMeeting = meetings.find(m => m.id === selectedMeetingId);
-        const manifestUser = currentMeeting?.manifest?.find((m:any) => String(m.vtu) === String(vtu));
-        
+        const manifestUser = currentMeeting?.manifest?.find((m:any) => normalizeVTU(m.vtu) === normVTU);
+
         const phoneNum = studentContact.phone || manifestUser?.phone || 'N/A';
         const studentName = studentContact.name || manifestUser?.name || selectedStudent.studentName || 'Student';
-        
+
         const dept = studentContact.dept || studentContact.userData?.dept || selectedStudent.dept || manifestUser?.dept;
         const year = studentContact.year || studentContact.userData?.year || selectedStudent.year || manifestUser?.year;
         const msg = `Hi ${studentName}, this is the UBA Student Coordinator. Your attendance verification is pending. Please contact your nearby coordinator to verify immediately. Attendance closes soon.`;
@@ -1727,7 +1740,7 @@ export default function CoordinatorPage() {
               </div>
               <h4 className="text-xs font-black uppercase tracking-widest text-gray-400 mb-3 border-b pb-2">Verified Field History</h4>
               <div className="max-h-60 overflow-y-auto pr-2 space-y-3 custom-scrollbar">
-                {attendance.filter(a => a.vtuNumber === (selectedStudent.vtuNumber || selectedStudent.vtu)).map((record, idx) => {
+                {attendance.filter(a => normalizeVTU(a.vtuNumber) === normVTU).map((record, idx) => {
                     const sessionDetails = meetings.find(m => m.id === record.meetingId);
                     return (
                       <div key={idx} className="flex items-center justify-between p-3 bg-white border border-gray-100 rounded-xl hover:border-orange-200 transition-colors">
@@ -1735,11 +1748,20 @@ export default function CoordinatorPage() {
                           <p className="text-sm font-bold text-gray-800 capitalize">{sessionDetails?.title || 'Field Session'}</p>
                           <p className="text-[10px] text-gray-400 font-medium">{new Date(record.timestamp).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}</p>
                         </div>
-                        <div className="w-8 h-8 rounded-full bg-green-50 flex items-center justify-center text-green-600">✓</div>
+                        <div className="flex flex-col items-end gap-1">
+                          {record.isOverride ? (
+                            <span className="text-[9px] px-2 py-1 bg-orange-100 text-orange-600 font-black rounded uppercase tracking-widest">Manual</span>
+                          ) : (
+                            <span className="text-[9px] px-2 py-1 bg-green-50 text-green-600 font-black rounded uppercase tracking-widest">Verified</span>
+                          )}
+                          {record.isOverride && record.enteredBy && (
+                            <span className="text-[7px] font-bold text-gray-400 uppercase truncate max-w-[80px]">By {record.enteredBy.split('@')[0]}</span>
+                          )}
+                        </div>
                       </div>
                     );
                 })}
-                {attendance.filter(a => a.vtuNumber === (selectedStudent.vtuNumber || selectedStudent.vtu)).length === 0 && (
+                {attendance.filter(a => normalizeVTU(a.vtuNumber) === normVTU).length === 0 && (
                   <div className="text-center py-6 text-gray-400 text-xs font-medium italic">No verified field history found.</div>
                 )}
               </div>

@@ -230,17 +230,23 @@ export default function AdminPage() {
 
   // Derived CRM Data
   const crmUsers = useMemo(() => {
+    // Normalize VTU for matching
+    const normalizeVTU = (vtu: any) => String(vtu).replace(/\D/g, '');
     const attendanceMap = (data.attendance || []).reduce((acc: any, scan: any) => {
-      acc[scan.vtuNumber] = (acc[scan.vtuNumber] || 0) + 1;
+      const normVTU = normalizeVTU(scan.vtuNumber);
+      acc[normVTU] = (acc[normVTU] || 0) + 1;
       return acc;
     }, {});
 
-    return (data.users || []).map((u: any) => ({
-      ...u,
-      eventsAttended: attendanceMap[u.vtuNumber] || 0,
-      // 🛡️ FIX: If they are in the list, assume they are members unless isGuest is EXACTLY true
-      isGuest: u.isGuest === true 
-    })).filter((u: any) => {
+    return (data.users || []).map((u: any) => {
+      const normVTU = normalizeVTU(u.vtuNumber);
+      return {
+        ...u,
+        eventsAttended: attendanceMap[normVTU] || 0,
+        //  FIX: If they are in the list, assume they are members unless isGuest is EXACTLY true
+        isGuest: u.isGuest === true 
+      };
+    }).filter((u: any) => {
       // 1. Tab Filter
       if (crmTab === 'members' && u.isGuest) return false;
       if (crmTab === 'guests' && !u.isGuest) return false;
@@ -825,8 +831,11 @@ export default function AdminPage() {
         {/* UNIVERSAL STUDENT DOSSIER MODAL */}
         {selectedStudent && (() => {
           const masterRoster = JSON.parse(localStorage.getItem('uba_master_roster') || '[]');
+          // Normalize VTU for matching
+          const normalizeVTU = (vtu: any) => String(vtu).replace(/\D/g, '');
           const vtu = selectedStudent.vtuNumber || selectedStudent.vtu;
-          const studentContact = masterRoster.find((u:any) => String(u.vtuNumber) === String(vtu)) || selectedStudent;
+          const normVTU = normalizeVTU(vtu);
+          const studentContact = masterRoster.find((u:any) => normalizeVTU(u.vtuNumber) === normVTU) || selectedStudent;
           const phoneNum = studentContact.phone || 'N/A';
           return (
           <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[150] p-4 backdrop-blur-sm" onClick={() => setSelectedStudent(null)}>
@@ -1074,9 +1083,10 @@ export default function AdminPage() {
                        <button onClick={() => setAnalyticsViewMap({...analyticsViewMap, [m.id]: !isAnalytics})} className={`px-3 py-2 rounded-lg text-[9px] font-black border transition uppercase shadow-sm tracking-widest ${isAnalytics ? 'bg-gray-900 text-white border-gray-900' : 'text-[#FF5722] border-[#FF5722]/30 bg-orange-50 hover:bg-orange-100'}`}>{isAnalytics ? 'Close Analytics' : 'Analytics'}</button>
                        <button onClick={() => downloadMeetingCSV(m.id, m.title)} className="px-3 py-2 rounded-lg text-[9px] font-black border border-gray-200 hover:bg-gray-50 shadow-sm uppercase tracking-widest text-gray-700">Export</button>
                        <button onClick={() => handleDeleteMeeting(m.id, m.isSOS)} className="px-3 py-2 rounded-lg text-[9px] bg-red-50 font-black text-red-600 hover:bg-red-500 hover:text-white transition shadow-sm border border-red-100 uppercase tracking-widest">Archive</button>
-                         <button onClick={() => handleActivateScheduled(m.id)} disabled={isProcessing} className="bg-[#FF5722] text-white px-8 py-4 rounded-2xl font-black uppercase tracking-widest shadow-xl hover:bg-[#E64A19] hover:-translate-y-1 transition-all disabled:opacity-50">
-                           {isProcessing ? 'Starting...' : 'Start Session Now'}
-                         </button>
+                       {/* ⚡ REPLACED BUTTON WITH STATUS BADGE */}
+                       <div className="bg-orange-100 text-orange-600 px-6 py-3 rounded-2xl font-black uppercase tracking-widest shadow-sm">
+                         Awaiting Coordinator Activation
+                       </div>
                      </div>
                   </div>
 

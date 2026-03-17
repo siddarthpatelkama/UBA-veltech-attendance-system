@@ -8,6 +8,7 @@ import confetti from 'canvas-confetti';
 import QRCode from 'react-qr-code';
 import CryptoJS from 'crypto-js';
 import Link from 'next/link';
+import SubscribeButton from '../components/SubscribeButton';
 
 export default function HomePage() {
   const router = useRouter();
@@ -496,6 +497,17 @@ export default function HomePage() {
 
   return (
     <div className="min-h-screen bg-white font-sans text-gray-900 flex flex-col">
+      {/* ⚡ THE NOTIFICATION BUTTON FOR STUDENTS ⚡ */}
+      {userData && userData.vtuNumber && userData.year && userData.dept && (
+        <div className="max-w-6xl mx-auto p-4 md:p-6 w-full">
+          <SubscribeButton 
+            vtu={userData.vtuNumber} 
+            year={userData.year} 
+            dept={userData.dept} 
+            role={userData.isGuest ? 'guest' : 'student'} 
+          />
+        </div>
+      )}
       
       {showAboutModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-md z-[100] flex items-center justify-center p-6" onClick={() => setShowAboutModal(false)}>
