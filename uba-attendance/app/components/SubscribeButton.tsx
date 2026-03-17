@@ -9,6 +9,8 @@ interface SubscribeProps {
   role: string;
 }
 
+let isOneSignalInit = false;
+
 export default function SubscribeButton({ vtu, year, dept, role }: SubscribeProps) {
   const [isVisible, setIsVisible] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false); // ⚡ Visual feedback state
@@ -25,11 +27,12 @@ export default function SubscribeButton({ vtu, year, dept, role }: SubscribeProp
         const isNative = typeof window !== 'undefined' && !!(window as any).Capacitor?.isNativePlatform();
 
         // 🌐 Initialize OneSignal quietly in the background for Web
-        if (!isNative && !OneSignalWeb.initialized) {
+        if (!isNative && !isOneSignalInit) {
           await OneSignalWeb.init({
             appId: "19e04964-ec0f-44c4-a1df-e56989f568f8",
             allowLocalhostAsSecureOrigin: true
           });
+          isOneSignalInit = true;
         }
       } catch (err) {
         console.warn("OneSignal init skipped", err);
