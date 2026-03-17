@@ -1,8 +1,6 @@
 "use client";
 import { useEffect, useState } from 'react';
-import OneSignal from 'react-onesignal';
 
-// ⚡ We define the exact data OneSignal needs to categorize this user
 interface SubscribeProps {
   vtu: string;
   year: string;
@@ -11,53 +9,53 @@ interface SubscribeProps {
 }
 
 export default function SubscribeButton({ vtu, year, dept, role }: SubscribeProps) {
-  const [isVisible, setIsVisible] = useState(false);
+  // ⚡ FORCE DEFAULT TO TRUE: It will always render unless proven otherwise
+  const [isVisible, setIsVisible] = useState(true);
 
   useEffect(() => {
-    if (localStorage.getItem('uba_alerts_enabled') === 'true') return; 
+    // 1. If we know they already did this, hide immediately
+    if (localStorage.getItem('uba_alerts_enabled') === 'true') {
+      setIsVisible(false);
+      return;
+    }
 
-    const checkSub = () => {
-      if (typeof window !== 'undefined' && window.OneSignal) {
-        const isOptedIn = window.OneSignal.User.PushSubscription.optedIn;
-        if (isOptedIn) {
+    // 2. Setup a loop to watch for OneSignal status changes
+    const interval = setInterval(() => {
+      if (typeof window !== 'undefined' && (window as any).OneSignal) {
+        const optedIn = (window as any).OneSignal.User?.PushSubscription?.optedIn;
+        if (optedIn) {
           localStorage.setItem('uba_alerts_enabled', 'true');
-          setIsVisible(false);
-        } else {
-          setIsVisible(true); 
+          setIsVisible(false); // Hide the button
+          clearInterval(interval); // Stop checking
         }
       }
-    };
-    
-    setTimeout(checkSub, 1500);
+    }, 2000); // Checks every 2 seconds
+
+    return () => clearInterval(interval);
   }, []);
 
   const handleSubscribe = async () => {
     try {
-      // 1. Ask for Browser Permission
-      await OneSignal.Slidedown.promptPush();
-      
-      // 2. Wait for them to click "Allow", then tag them in OneSignal
-      setTimeout(() => {
-        if (window.OneSignal && window.OneSignal.User.PushSubscription.optedIn) {
-          
-          // ⚡ THIS IS THE MAGIC: OneSignal instantly categorizes them based on this data
-          window.OneSignal.User.addTags({
-            vtu: String(vtu).toUpperCase(),
-            year: String(year),
-            dept: String(dept).toUpperCase(),
-            role: String(role).toLowerCase()
-          });
-
-          // Lock the button away forever
-          localStorage.setItem('uba_alerts_enabled', 'true'); 
-          setIsVisible(false);
-        }
-      }, 3000);
+      if (typeof window !== 'undefined' && (window as any).OneSignal) {
+        const OneSignal = (window as any).OneSignal;
+        
+        // 1. Trigger the prompt
+        await OneSignal.Slidedown.promptPush();
+        
+        // 2. Tag them instantly
+        OneSignal.User.addTags({
+          vtu: String(vtu).toUpperCase(),
+          year: String(year),
+          dept: String(dept).toUpperCase(),
+          role: String(role).toLowerCase()
+        });
+      }
     } catch (error) {
       console.error("Subscription error:", error);
     }
   };
 
+  // If hidden, render nothing
   if (!isVisible) return null;
 
   return (
