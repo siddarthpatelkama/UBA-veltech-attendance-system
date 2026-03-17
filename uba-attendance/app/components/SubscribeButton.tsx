@@ -63,26 +63,23 @@ export default function SubscribeButton({ vtu, year, dept, role }: SubscribeProp
           }
         }
       } else {
-        // 🌐 WEB BROWSER PROMPT (THE BULLETPROOF BYPASS)
+        // 🌐 WEB BROWSER PROMPT
+        await OneSignalWeb.Notifications.requestPermission();
         
-        // 1. Ask the browser directly for permission (This bypasses the OneSignal bug)
-        const permission = await window.Notification.requestPermission();
-        
-        if (permission === "granted") {
-          // 2. If they click Allow, silently tag them in OneSignal
-          OneSignalWeb.User.addTags({
-            vtu: String(vtu).toUpperCase(),
-            year: String(year),
-            dept: String(dept).toUpperCase(),
-            role: String(role).toLowerCase()
-          });
+        // Wait a second for the browser to register the service worker
+        setTimeout(() => {
+          if (window.Notification && Notification.permission === "granted") {
+            OneSignalWeb.User.addTags({
+              vtu: String(vtu).toUpperCase(),
+              year: String(year),
+              dept: String(dept).toUpperCase(),
+              role: String(role).toLowerCase()
+            });
 
-          // 3. Hide the button forever
-          localStorage.setItem('uba_alerts_enabled', 'true'); 
-          setIsVisible(false);
-        } else {
-          alert("You blocked notifications! Please allow them in your browser settings (click the lock icon next to the URL).");
-        }
+            localStorage.setItem('uba_alerts_enabled', 'true');
+            setIsVisible(false);
+          }
+        }, 1500);
       }
     } catch (error) {
       console.error(error);
