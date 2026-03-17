@@ -110,5 +110,5 @@ export default function SubscribeButton({ vtu, year, dept, role }: SubscribeProp
         🔔 Turn On Alerts
       </button>
     </div>
-  );
+ );
 }
