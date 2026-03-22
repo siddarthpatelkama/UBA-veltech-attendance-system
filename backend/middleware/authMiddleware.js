@@ -1,5 +1,9 @@
 const admin = require("../firebaseAdmin");
 const db = require("../config/firebase");
+const NodeCache = require("node-cache");
+
+// Initialize memory cache (Data expires after 15 minutes to keep it fresh)
+const userCache = new NodeCache({ stdTTL: 900 }); 
 
 async function verifyToken(req, res, next) {
   try {
@@ -18,70 +22,72 @@ async function verifyToken(req, res, next) {
       return res.status(401).json({ success: false, message: "Unauthorized: Invalid token" });
     }
 
-    const userRef = db.collection("users").doc(email);
-    const userDoc = await userRef.get();
-
-    let role = "student"; 
-    
     // UNIVERSAL CLEANER: Strip "VTU" and all non-numeric characters
     const vtuNumber = email.split("@")[0].replace(/\D/g, ''); 
     
-    let registeredDeviceId = null; 
+    // --- 🚀 FAST PATH: Check RAM Cache First ---
+    let userData = userCache.get(email);
 
-    if (userDoc.exists) {
-      const userData = userDoc.data();
-      role = userData.role || "student";
-      registeredDeviceId = userData.registeredDeviceId; 
-    } else {
-      await userRef.set({
-        email: email,
-        name: decodedToken.name || vtuNumber,
-        vtuNumber: vtuNumber,
-        role: "student",
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        ...(incomingDeviceId && { registeredDeviceId: incomingDeviceId })
-      });
-      registeredDeviceId = incomingDeviceId;
-    }
+    // --- 🐢 SLOW PATH: Database Fetch (Only runs if cache is empty) ---
+    if (!userData) {
+      const userRef = db.collection("users").doc(email);
+      const userDoc = await userRef.get();
 
-    // 1. Define the Admin List (Comma separated in .env)
-    const headEmails = (process.env.UBA_HEAD_EMAIL || "").split(",").map(e => e.trim());
-    
-    // 2. Check if the current user is an Admin
-    if (headEmails.includes(email)) {
-      role = "head";
+      let role = "student"; 
+      let registeredDeviceId = null; 
+
+      if (userDoc.exists) {
+        const dbData = userDoc.data();
+        role = dbData.role || "student";
+        registeredDeviceId = dbData.registeredDeviceId; 
+      } else {
+        await userRef.set({
+          email: email,
+          name: decodedToken.name || vtuNumber,
+          vtuNumber: vtuNumber,
+          role: "student",
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          ...(incomingDeviceId && { registeredDeviceId: incomingDeviceId })
+        });
+        registeredDeviceId = incomingDeviceId;
+      }
+
+      // Check Admin List in .env
+      const headEmails = (process.env.UBA_HEAD_EMAIL || "").split(",").map(e => e.trim());
+      if (headEmails.includes(email)) role = "head";
+
+      userData = { role, registeredDeviceId };
+      
+      // Save to RAM cache for 15 minutes
+      userCache.set(email, userData);
     }
 
     // 3. THE "VIP PASS" DOMAIN LOCK
-    // Block the user ONLY if: They are NOT an Admin AND they DON'T have a Veltech email
     const isVeltech = email.endsWith('@veltech.edu.in');
-    const isAdmin = (role === "head");
+    const isAdmin = (userData.role === "head");
 
     if (!isVeltech && !isAdmin) {
        console.log(`[AUTH] Blocked unauthorized domain: ${email}`);
-       return res.status(403).json({ 
-         success: false, 
-         message: "Access Denied: Please use your Vel Tech ID or contact the Admin." 
-       });
+       return res.status(403).json({ success: false, message: "Access Denied: Please use your Vel Tech ID." });
     }
 
-    if (role !== "head" && role !== "admin") {
-      if (incomingDeviceId) {
-        if (!registeredDeviceId) {
-           await userRef.set({ registeredDeviceId: incomingDeviceId }, { merge: true });
-           registeredDeviceId = incomingDeviceId;
-        }
+    // 4. Update Device ID if missing (and not an admin)
+    if (userData.role !== "head" && userData.role !== "admin") {
+      if (incomingDeviceId && !userData.registeredDeviceId) {
+         await db.collection("users").doc(email).set({ registeredDeviceId: incomingDeviceId }, { merge: true });
+         userData.registeredDeviceId = incomingDeviceId;
+         userCache.set(email, userData); // Update cache
       }
     }
 
     req.user = {
       ...decodedToken,
       email: email,
-      role: role,
+      role: userData.role,
       name: decodedToken.name || email.split("@")[0],
-      vtuNumber: vtuNumber, // Pass clean numeric ID to controllers
+      vtuNumber: vtuNumber, 
       currentDeviceId: incomingDeviceId,
-      registeredDeviceId: registeredDeviceId 
+      registeredDeviceId: userData.registeredDeviceId 
     };
 
     next();

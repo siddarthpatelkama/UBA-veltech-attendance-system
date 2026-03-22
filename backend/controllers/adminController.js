@@ -374,54 +374,62 @@ exports.listCoordinators = async (req, res) => {
  * REPORTS & ANALYTICS
  */
 exports.getAllReports = async (req, res) => {
-  if (req.user.role !== "head") return res.status(403).send();
-  
-  try {
-    const skipRoster = req.query.skipRoster === 'true';
+    if (req.user.role !== "head") return res.status(403).send();
+    try {
+      const skipRoster = req.query.skipRoster === 'true';
 
-    // BASE FETCHES: These run every time.
-    // Notice we added the count() aggregation here. It costs 1 read per 1000 users.
-    const baseFetches = [
-      db.collection("meetings").get(),
-      db.collection("attendance").get(),
-      db.collection("suspiciousLogs").get(),
-      db.collection("users").count().get() 
-    ];
+      // 1. STATS AGGREGATION (Cheap operations that don't download documents)
+      const statsFetches = [
+        db.collection("meetings").count().get(),
+        db.collection("attendance").count().get(),
+        db.collection("users").count().get(),
+        db.collection("meetings").where("status", "==", "active").count().get()
+      ];
 
-    // HEAVY FETCH: Only fetch the full users collection if the frontend actually needs it
-    if (!skipRoster) baseFetches.push(db.collection("users").get());
+      // 2. DATA FETCHING (Capped limits to prevent Server OOM crashes)
+      const dataFetches = [
+        db.collection("meetings").orderBy("createdAt", "desc").limit(100).get(), // Only latest 100
+        db.collection("attendance").orderBy("timestamp", "desc").limit(200).get(), // Only latest 200
+        db.collection("suspiciousLogs").limit(50).get()
+      ];
 
-    const results = await Promise.all(baseFetches);
-    
-    // Unpack the results based on our array order
-    const [meetingsSnap, attendanceSnap, suspSnap, usersCountSnap] = results;
-    const usersSnap = skipRoster ? null : results[4];
-    
-    const meetings = meetingsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-    const attendance = attendanceSnap.docs.map(doc => doc.data());
-    const suspiciousLogs = suspSnap.docs.map(doc => doc.data());
-
-    res.json({ 
-      meetings, 
-      attendance, 
-      users: usersSnap ? usersSnap.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-        registeredDeviceId: doc.data().registeredDeviceId
-      })) : [],
-      suspiciousLogs,
-      totalUsersCount: usersCountSnap.data().count, // Pass the cheap count to the frontend
-      stats: { 
-        totalMeetings: meetings.length, 
-        totalAttendance: attendance.length, 
-        activeMeetings: meetings.filter(m => m.status === 'active').length, 
-        uniqueStudents: new Set(attendance.map(a => a.vtuNumber)).size 
+      if (!skipRoster) {
+        // Limit roster fetch if it's massive, frontend should implement search instead of dumping all
+        dataFetches.push(db.collection("users").limit(500).get()); 
       }
-    });
-  } catch (error) { 
-    console.error("Get All Reports Error:", error);
-    res.status(500).send(); 
-  }
+
+      // Execute all queries in parallel
+      const [meetingsCount, attendanceCount, usersCountSnap, activeMeetingsCount] = await Promise.all(statsFetches);
+      const dataResults = await Promise.all(dataFetches);
+    
+      const [meetingsSnap, attendanceSnap, suspSnap] = dataResults;
+      const usersSnap = skipRoster ? null : dataResults[3];
+    
+      const meetings = meetingsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const attendance = attendanceSnap.docs.map(doc => doc.data());
+      const suspiciousLogs = suspSnap.docs.map(doc => doc.data());
+
+      res.json({ 
+        meetings, 
+        attendance, 
+        users: usersSnap ? usersSnap.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data(),
+          registeredDeviceId: doc.data().registeredDeviceId
+        })) : [],
+        suspiciousLogs,
+        totalUsersCount: usersCountSnap.data().count,
+        stats: { 
+          totalMeetings: meetingsCount.data().count, 
+          totalAttendance: attendanceCount.data().count, 
+          activeMeetings: activeMeetingsCount.data().count, 
+          uniqueStudents: "N/A (Capped)" // Removed expensive set calculation
+        }
+      });
+    } catch (error) { 
+      console.error("Get All Reports Error:", error);
+      res.status(500).send(); 
+    }
 };
 
 /**
