@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState, useRef, useMemo } from 'react';
+
 import { useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import ProtectedRoute from '../components/ProtectedRoute';
@@ -8,6 +9,8 @@ import { signOut } from 'firebase/auth';
 import QRCode from 'react-qr-code';
 import CryptoJS from 'crypto-js';
 import SubscribeButton from '../components/SubscribeButton';
+import { collection, query, where, onSnapshot, orderBy, doc, updateDoc } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
 
 const LeafletMap = dynamic(() => import('../components/MapBox'), { ssr: false });
 
@@ -18,6 +21,14 @@ const getSafeTime = (val: any, fallback: number = 0) => {
   if (val._seconds) return val._seconds * 1000;
   const d = new Date(val).getTime();
   return isNaN(d) ? fallback : d;
+};
+
+// 1. Helper function to find the actual active phase securely
+const getActivePhase = (meetingData: any) => {
+  if (!meetingData || meetingData.status !== 'active') return null;
+  
+  // Scans the whole array and returns the one that is actually active
+  return meetingData.phases?.find((phase:any) => phase.status.toLowerCase() === 'active') || null;
 };
 
 export default function CoordinatorPage() {
@@ -882,13 +893,31 @@ export default function CoordinatorPage() {
   const activePhase = isVerifiable ? (displayMeeting.phases || []).find((p:any) => p.status === 'active') : null;
   const completedPhases = isVerifiable ? (displayMeeting.phases || []).filter((p:any) => p.status === 'closed') : [];
   
-  const phaseAttendees = activePhase ? totalDisplayAttendees.filter(a => a.phaseId === activePhase.id) : totalDisplayAttendees;
-  const verifiedVtus = phaseAttendees.map(a => a.vtuNumber || a.vtu);
-  
+  // 🚨 FIX 2: Unified Attendance Query - show all attendance for the meeting, not just current phase
+  const allMeetingAttendees = totalDisplayAttendees; // Already filtered by meetingId above
+  const tabVerified = (allMeetingAttendees || []).filter(a => !a.isOverride);
+  const tabManual = (allMeetingAttendees || []).filter(a => a.isOverride);
+  const verifiedVtus = allMeetingAttendees.map(a => a.vtuNumber || a.vtu);
   const tabMissing = isVerifiable ? (manifest || []).filter((m:any) => !verifiedVtus.includes(m.vtu)) : [];
-  const tabVerified = (phaseAttendees || []).filter(a => !a.isOverride);
-  const tabManual = (phaseAttendees || []).filter(a => a.isOverride);
   const tabSuspicious = (suspiciousLogs || []).filter(s => s.meetingId === displayId && (!activePhase || s.phaseId === activePhase.id));
+
+  // Restore phaseAttendees for UI references
+  const phaseAttendees = activePhase ? allMeetingAttendees.filter(a => a.phaseId === activePhase.id) : allMeetingAttendees;
+// 🚨 FIX 3: End Phase Backend Bug - update only the phase status, not the parent meeting status
+const handleEndCurrentPhase = async (meetingId: string, phaseIndexToClose: number) => {
+  try {
+    const meetingRef = doc(db, "meetings", meetingId);
+    const fieldPath = `phases.${phaseIndexToClose}.status`;
+    await updateDoc(meetingRef, {
+      [fieldPath]: "closed",
+      [`phases.${phaseIndexToClose}.endTime`]: Date.now()
+    });
+    alert("Phase ended successfully. Scanner is paused until next phase starts.");
+  } catch (error) {
+    console.error("Error ending phase:", error);
+    alert("Failed to end phase.");
+  }
+};
 
   if (initialLoad && !networkLocked) return (
     <div className="min-h-screen bg-gray-50 p-4 md:p-6 flex flex-col gap-6 w-full max-w-7xl mx-auto">
