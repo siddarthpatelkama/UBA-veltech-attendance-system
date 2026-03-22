@@ -47,6 +47,18 @@ export default function HomePage() {
   // --- ORIGINAL SETUP FORM STATE + NEW PREFERRED NAME ---
   const [preferredName, setPreferredName] = useState('');
   const [dept, setDept] = useState('');
+  // Updated department dropdown options
+  const DEPARTMENTS = [
+    "CSE (All Branches)",
+    "ECE",
+    "EEE",
+    "MECH",
+    "IT",
+    "AERO",
+    "CIVIL",
+    "BIOTECH",
+    "BIOMEDICAL"
+  ];
   const [year, setYear] = useState('');
   const [gender, setGender] = useState('');
   const [phone, setPhone] = useState('');
@@ -463,7 +475,10 @@ export default function HomePage() {
             <div>
               <label className="block text-[10px] font-black text-[#FF5722] mb-2 uppercase">Dept</label>
               <select value={dept} onChange={(e) => setDept(e.target.value)} className="w-full p-4 bg-[#FFF9F5] rounded-2xl outline-none font-bold text-sm">
-                <option value="">Select</option><option value="CSE">CSE</option><option value="AIDS">AIDS</option><option value="AIML">AIML</option><option value="ECE">ECE</option><option value="MECH">MECH</option><option value="CIVIL">CIVIL</option>
+                <option value="">Select</option>
+                {DEPARTMENTS.map((d) => (
+                  <option key={d} value={d}>{d}</option>
+                ))}
               </select>
             </div>
             <div>

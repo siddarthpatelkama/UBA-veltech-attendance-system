@@ -778,15 +778,23 @@ export default function CoordinatorPage() {
     fetchData(false);
   };
 
+  // 🚨 FIX 2: Prevent double phase creation
   const handleStartPhase = async () => {
+    if (isProcessing) return; // Prevent double clicks
     if (!newPhaseTitle.trim()) return showToast("Enter phase name");
-    const token = await auth.currentUser?.getIdToken();
-    await fetch(`${API_URL}/meeting/create-phase`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ meetingId: selectedMeetingId, phaseTitle: newPhaseTitle })
-    });
-    setNewPhaseTitle(''); fetchData(false);
-    showToast("Phase Started!");
+    setIsProcessing(true); // Lock the UI
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      await fetch(`${API_URL}/meeting/create-phase`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ meetingId: selectedMeetingId, phaseTitle: newPhaseTitle })
+      });
+      setNewPhaseTitle(''); 
+      fetchData(false);
+      showToast("Phase Started!");
+    } finally {
+      setIsProcessing(false); // Unlock the UI
+    }
   };
 
   const handleClosePhase = async () => {
@@ -894,15 +902,19 @@ export default function CoordinatorPage() {
   const completedPhases = isVerifiable ? (displayMeeting.phases || []).filter((p:any) => p.status === 'closed') : [];
   
   // 🚨 FIX 2: Unified Attendance Query - show all attendance for the meeting, not just current phase
+  // 🚨 FIX 1: Only show current phase attendees in tabs
   const allMeetingAttendees = totalDisplayAttendees; // Already filtered by meetingId above
-  const tabVerified = (allMeetingAttendees || []).filter(a => !a.isOverride);
-  const tabManual = (allMeetingAttendees || []).filter(a => a.isOverride);
-  const verifiedVtus = allMeetingAttendees.map(a => a.vtuNumber || a.vtu);
+  const currentPhaseAttendees = activePhase ? allMeetingAttendees.filter(a => a.phaseId === activePhase.id) : allMeetingAttendees;
+  const tabVerified = currentPhaseAttendees.filter(a => !a.isOverride);
+  const tabManual = currentPhaseAttendees.filter(a => a.isOverride);
+  const verifiedVtus = currentPhaseAttendees.map(a => a.vtuNumber || a.vtu);
   const tabMissing = isVerifiable ? (manifest || []).filter((m:any) => !verifiedVtus.includes(m.vtu)) : [];
   const tabSuspicious = (suspiciousLogs || []).filter(s => s.meetingId === displayId && (!activePhase || s.phaseId === activePhase.id));
+  // For UI references
+  const phaseAttendees = currentPhaseAttendees;
 
-  // Restore phaseAttendees for UI references
-  const phaseAttendees = activePhase ? allMeetingAttendees.filter(a => a.phaseId === activePhase.id) : allMeetingAttendees;
+  // 🚨 FIX 4: Phase Analytics Modal state
+  const [selectedPhaseAnalytics, setSelectedPhaseAnalytics] = useState<any>(null);
 // 🚨 FIX 3: End Phase Backend Bug - update only the phase status, not the parent meeting status
 const handleEndCurrentPhase = async (meetingId: string, phaseIndexToClose: number) => {
   try {
@@ -1570,9 +1582,20 @@ const handleEndCurrentPhase = async (meetingId: string, phaseIndexToClose: numbe
                                    <div key={i} onClick={() => setSelectedStudent({studentName: m.name, vtuNumber: m.vtu, phone})} className="p-4 rounded-2xl border border-red-100 bg-white flex justify-between items-center shadow-sm cursor-pointer hover:border-red-500 transition-colors">
                                      <div><p className="font-bold text-sm text-gray-900">{m.name || 'Unknown'}</p><p className="text-[10px] font-mono font-bold text-gray-500">{m.vtu}</p></div>
                                      <div className="flex items-center gap-2">
-                                       {phone !== 'N/A' && <a href={`tel:${phone}`} onClick={(e) => e.stopPropagation()} className="text-[9px] px-2 py-1 bg-green-100 text-green-700 font-black rounded uppercase tracking-widest hover:bg-green-500 hover:text-white transition-colors">📞 Call</a>}
-                                       <span className="text-[8px] px-2 py-1 bg-red-100 text-red-600 font-black rounded uppercase">Abandoned</span>
-                                     </div>
+                                         {phone !== 'N/A' && <a href={`tel:${phone}`} onClick={(e) => e.stopPropagation()} className="text-[9px] px-2 py-1 bg-green-100 text-green-700 font-black rounded uppercase tracking-widest hover:bg-green-500 hover:text-white transition-colors">📞 Call</a>}
+                                         <button 
+                                           onClick={(e) => { 
+                                             e.stopPropagation(); 
+                                             if(confirm(`Permanently remove ${m.vtu} from this event?`)) {
+                                               handleManualRemove(m.vtu);
+                                             }
+                                           }} 
+                                           className="text-[9px] px-2 py-1 bg-gray-100 text-gray-600 font-black rounded uppercase tracking-widest hover:bg-red-500 hover:text-white transition-colors"
+                                         >
+                                           🗑️ Remove
+                                         </button>
+                                         <span className="text-[8px] px-2 py-1 bg-red-100 text-red-600 font-black rounded uppercase">Abandoned</span>
+                                       </div>
                                    </div>
                                    );
                                 })}
@@ -1627,7 +1650,7 @@ const handleEndCurrentPhase = async (meetingId: string, phaseIndexToClose: numbe
                         {completedPhases.map((phase:any, idx:number) => {
                            const pAtt = totalDisplayAttendees.filter(a => a.phaseId === phase.id);
                            return (
-                             <div key={idx} onClick={() => alert(`Analytics for ${phase.title}: \n\nVerified: ${pAtt.length} \nMissing: ${manifest.length - pAtt.length}`)} className="p-4 rounded-2xl border border-gray-200 bg-gray-50 flex justify-between items-center shadow-sm cursor-pointer hover:border-orange-300 transition-colors">
+                             <div key={idx} onClick={() => setSelectedPhaseAnalytics(phase)} className="p-4 rounded-2xl border border-gray-200 bg-gray-50 flex justify-between items-center shadow-sm cursor-pointer hover:border-orange-300 transition-colors">
                                <div>
                                  <h4 className="font-black text-sm uppercase text-gray-900">{phase.title}</h4>
                                  <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest mt-1">Closed Checkpoint</p>
@@ -1639,6 +1662,29 @@ const handleEndCurrentPhase = async (meetingId: string, phaseIndexToClose: numbe
                              </div>
                            );
                         })}
+                              {/* Phase Analytics Modal */}
+                              {selectedPhaseAnalytics && (() => {
+                                const pAtt = totalDisplayAttendees.filter(a => a.phaseId === selectedPhaseAnalytics.id);
+                                return (
+                                  <div className="fixed inset-0 bg-black/60 z-[200] flex items-center justify-center backdrop-blur-sm p-4">
+                                    <div className="bg-white p-8 rounded-[2rem] max-w-sm w-full shadow-2xl animate-in zoom-in">
+                                      <h2 className="text-2xl font-black text-gray-900 uppercase tracking-tight mb-1">{selectedPhaseAnalytics.title}</h2>
+                                      <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-6">Phase Analytics</p>
+                                      <div className="grid grid-cols-2 gap-4 mb-6">
+                                        <div className="bg-green-50 p-4 rounded-xl border border-green-100 text-center">
+                                          <p className="text-3xl font-black text-green-600 mb-1">{pAtt.length}</p>
+                                          <p className="text-[9px] font-black text-green-500 uppercase tracking-widest">Verified</p>
+                                        </div>
+                                        <div className="bg-red-50 p-4 rounded-xl border border-red-100 text-center">
+                                          <p className="text-3xl font-black text-red-500 mb-1">{manifest.length - pAtt.length}</p>
+                                          <p className="text-[9px] font-black text-red-400 uppercase tracking-widest">Missing</p>
+                                        </div>
+                                      </div>
+                                      <button onClick={() => setSelectedPhaseAnalytics(null)} className="w-full bg-gray-100 text-gray-700 font-black py-4 rounded-xl uppercase tracking-widest text-xs hover:bg-gray-200 transition">Close Report</button>
+                                    </div>
+                                  </div>
+                                );
+                              })()}
                       </div>
                     </div>
                   )}
