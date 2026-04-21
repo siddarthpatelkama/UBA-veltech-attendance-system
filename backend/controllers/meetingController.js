@@ -5,7 +5,7 @@ if (!global.ubaCache) {
 }
 const CACHE_DURATION = 15 * 60 * 1000; // 15 Minutes
 const db = require("../config/firebase");
-const onesignal = require('../utils/onesignal');
+
 
 // --- SESSION CREATION ---
 exports.createMeeting = async (req, res) => {
@@ -152,14 +152,16 @@ exports.createPhase = async (req, res) => {
     
     // --- SAFE PUSH NOTIFICATION BLOCK ---
     try {
-      await onesignal.sendNotification(
-        `meeting_${meetingId}`,
-        `🔴 SESSION LIVE`,
-        `${phaseTitle} has started! Open your app to scan the QR code.`,
-        { type: 'live', meetingId: meetingId, phaseId: newPhase.id }
-      );
+      await admin.messaging().send({
+        topic: 'all_students',
+        notification: {
+          title: `🔴 SESSION LIVE`,
+          body: `${phaseTitle} has started! Open your app to scan.`
+        },
+        data: { type: 'live', meetingId: meetingId, phaseId: String(newPhase.id) }
+      });
     } catch (pushError) {
-      console.log("⚠️ Phase Live notification failed, but phase was created successfully.", pushError.message);
+      console.log("⚠️ Phase Live notification failed:", pushError.message);
     }
     // ------------------------------------
 
@@ -363,26 +365,32 @@ exports.closeAttendance = async (req, res) => {
 
     // 2. STRIKE & DEMOTION PIPELINE (Verifiable Trips Only)
     if (meetingData.type === "verifiable" && meetingData.manifest && meetingData.manifest.length > 0) {
-      
-      // Fetch all successful scans for this meeting
-      const attendanceSnap = await db.collection("attendance").where("meetingId", "==", meetingId).get();
-      const attendedVtus = new Set(attendanceSnap.docs.map(doc => doc.data().vtuNumber));
 
-      // Find who missed the event
-      const missingStudents = meetingData.manifest.filter(m => !attendedVtus.has(m.vtu));
+      // Normalize helper: strips all non-digits so "VTU32533" === "32533"
+      const norm = (v) => String(v || '').replace(/\D/g, '');
+
+      // Fetch all successful scans and normalize their VTUs
+      const attendanceSnap = await db.collection("attendance").where("meetingId", "==", meetingId).get();
+      const attendedVtus = new Set(attendanceSnap.docs.map(doc => norm(doc.data().vtuNumber)));
+
+      // Find absences — normalize manifest VTU before comparing
+      const missingStudents = meetingData.manifest.filter(m => !attendedVtus.has(norm(m.vtu)));
 
       for (const student of missingStudents) {
-        const masterRef = db.collection("master_roster").doc(student.vtu);
+        const cleanVtu = norm(student.vtu);
+        if (!cleanVtu) continue; // Skip malformed entries
+
+        const masterRef = db.collection("master_roster").doc(cleanVtu);
         const masterDoc = await masterRef.get();
 
         if (masterDoc.exists) {
           const userData = masterDoc.data();
-          const currentStrikes = (userData.strikes || 0) + 1; // Apply +1 Strike immediately
+          const currentStrikes = (userData.strikes || 0) + 1;
 
-          // Create the Pending Excuse Document
-          const excuseRef = db.collection("pending_excuses").doc(`${meetingId}_${student.vtu}`);
+          // Create the Pending Excuse Document (keyed by clean VTU)
+          const excuseRef = db.collection("pending_excuses").doc(`${meetingId}_${cleanVtu}`);
           batch.set(excuseRef, {
-            vtu: student.vtu,
+            vtu: cleanVtu,
             meetingId: meetingId,
             eventTitle: meetingData.title,
             status: 'pending',
@@ -390,38 +398,42 @@ exports.closeAttendance = async (req, res) => {
             strikesAdded: 1
           });
 
-          // Execute 3-Strike Rule (Demotion)
           if (currentStrikes >= 3) {
-            const tempRef = db.collection("temporary_roster").doc(student.vtu);
+            // Demote to Guest
+            const tempRef = db.collection("temporary_roster").doc(cleanVtu);
             batch.set(tempRef, {
               ...userData,
               strikes: currentStrikes,
               isGuest: true,
               demotedAt: Date.now()
             }, { merge: true });
-            
-            batch.delete(masterRef); // Remove from Club
+            batch.delete(masterRef);
 
-            // --- FCM Trigger 3A: Account Demotion Alert ---
-                await onesignal.sendNotification(
-              `student_${student.vtu}`, // Targeted specifically to this student
-              `🚨 UBA Account Demoted`,
-              `You have missed 3 events. You have been removed from the Master Roster.`,
-              { type: 'demotion', vtu: student.vtu }
-            );
-            // ----------------------------------------------
+            // FCM Demotion Alert (best-effort, won't crash close if it fails)
+            try {
+              await admin.messaging().send({
+                topic: `student_${cleanVtu}`,
+                notification: {
+                  title: `🚨 UBA Account Demoted`,
+                  body: `You have missed 3 events and have been removed from the Master Roster.`
+                }
+              });
+            } catch (e) { console.warn(`[FCM] Demotion alert failed for ${cleanVtu}:`, e.message); }
+
           } else {
-            // Otherwise, just update the strike count in the master roster
+            // Update strike count
             batch.update(masterRef, { strikes: currentStrikes });
 
-            // --- FCM Trigger 3B: Strike Warning Alert ---
-                await onesignal.sendNotification(
-              `student_${student.vtu}`,
-              `⚠️ Strike Added (${currentStrikes}/3)`,
-              `You missed ${meetingData.title}. Submit an excuse with GPS immediately to avoid demotion.`,
-              { type: 'strike_warning', meetingId: meetingId }
-            );
-            // ----------------------------------------------
+            // FCM Strike Warning
+            try {
+              await admin.messaging().send({
+                topic: `student_${cleanVtu}`,
+                notification: {
+                  title: `⚠️ Strike Added (${currentStrikes}/3)`,
+                  body: `You missed "${meetingData.title}". Submit an excuse with GPS immediately.`
+                }
+              });
+            } catch (e) { console.warn(`[FCM] Strike alert failed for ${cleanVtu}:`, e.message); }
           }
         }
       }
@@ -434,12 +446,16 @@ exports.closeAttendance = async (req, res) => {
         const attendanceSnap2 = await db.collection("attendance").where("meetingId", "==", meetingId).get();
         const attendedCount = attendanceSnap2.size;
         const missingCount = (meetingData.manifest || []).length - attendedCount;
-          await onesignal.sendNotification(
-          'admin',
-          `📊 Trip Closed: ${meetingData.title}`,
-          `${attendedCount} Verified. ${missingCount} Missing. Strikes applied.`,
-          { type: 'analytics', meetingId: meetingId }
-        );
+        try {
+          await admin.messaging().send({
+            topic: 'coordinators',
+            notification: {
+              title: `📊 Trip Closed: ${meetingData.title}`,
+              body: `${attendedCount} Verified. ${missingCount} Missing. Strikes applied.`
+            },
+            data: { type: 'analytics', meetingId: String(meetingId) }
+          });
+        } catch (e) { console.log("⚠️ Admin summary push failed:", e.message); }
     }
     // ----------------------------------------------
 
@@ -523,21 +539,33 @@ exports.scheduleMeeting = async (req, res) => {
     };
 
     const docRef = await db.collection("meetings").add(meetingData);
-    // --- SAFE PUSH NOTIFICATION BLOCK ---
+    // --- AUTOMATED FCM NOTIFICATION TRIGGER ---
     try {
-      const targetTopics = (targetAudience && targetAudience.length > 0) ? targetAudience.map(y => `year_${y}`) : ['all_students'];
-      for (const topic of targetTopics) {
-        await onesignal.sendNotification(
-          topic,
-          `🗓️ New Event: ${title}`,
-          `Scheduled for ${date} at ${venue || 'TBA'}. Check your app for details.`,
-          { type: 'scheduled', meetingId: docRef.id }
+      const notificationPayload = {
+        notification: {
+          title: `📅 New Event: ${title}`,
+          body: `Scheduled for ${date || 'TBA'} at ${venue || 'TBA'}. Open the app for details!`,
+        },
+        android: { priority: 'high' },
+        webpush: { headers: { Urgency: 'high' }, notification: { icon: '/uba-logo.png' } }
+      };
+
+      if (!targetAudience || targetAudience.length === 0) {
+        // Broadcast to everyone
+        await admin.messaging().send({ ...notificationPayload, topic: 'all_students' });
+        console.log(`[FCM-AUTO] Global meeting alert sent for: ${title}`);
+      } else {
+        // Target specific year topics (e.g., year_2, year_3)
+        const sendPromises = targetAudience.map(year =>
+          admin.messaging().send({ ...notificationPayload, topic: `year_${year}` })
         );
+        await Promise.all(sendPromises);
+        console.log(`[FCM-AUTO] Targeted alert sent to years: ${targetAudience.join(', ')}`);
       }
     } catch (pushError) {
-      console.log("⚠️ Push notification failed, but meeting was created successfully.", pushError.message);
+      console.log("⚠️ FCM notification failed, but meeting was created successfully.", pushError.message);
     }
-    // ------------------------------------
+    // ------------------------------------------
     return res.status(201).json({ success: true, meetingId: docRef.id });
   } catch (error) {
     console.error("Schedule Error:", error);
@@ -617,14 +645,16 @@ exports.activateScheduledMeeting = async (req, res) => {
 
     // --- SAFE PUSH NOTIFICATION BLOCK ---
     try {
-      await onesignal.sendNotification(
-        `meeting_${meetingId}`,
-        `🔴 SESSION ACTIVATED`,
-        `Session is now live! Open your app to scan the QR code.`,
-        { type: 'activated', meetingId }
-      );
+      await admin.messaging().send({
+        topic: 'all_students',
+        notification: {
+          title: `🔴 SESSION ACTIVATED`,
+          body: `Session is now live! Open your app to scan the QR code.`
+        },
+        data: { type: 'activated', meetingId: String(meetingId) }
+      });
     } catch (pushError) {
-      console.log("⚠️ Activate notification failed, but session started safely.", pushError.message);
+      console.log("⚠️ Activate notification failed:", pushError.message);
     }
     // ------------------------------------
     if (global.ubaCache) global.ubaCache.lastUpdated = 0; // Clear Cache

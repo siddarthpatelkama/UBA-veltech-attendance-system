@@ -161,11 +161,12 @@ exports.sendBroadcast = async (req, res) => {
   }
 };
 
-// --- FCM TOKEN SYNC ---
+// --- FCM TOKEN SYNC (MULTI-TOPIC) ---
 exports.updateFcmToken = async (req, res) => {
   try {
     const { fcmToken } = req.body;
     const email = req.user.email;
+    const vtu = req.user.vtuNumber; // From verifyToken middleware
 
     if (!fcmToken) return res.status(400).json({ error: "FCM token is required." });
 
@@ -175,11 +176,33 @@ exports.updateFcmToken = async (req, res) => {
       { merge: true }
     );
 
-    // 2. Subscribe this device to the 'all_students' FCM topic
-    await admin.messaging().subscribeToTopic(fcmToken, 'all_students');
+    // 2. Fetch the student's profile to find their Year
+    const masterDoc = await db.collection("master_roster").doc(vtu).get();
+    const studentYear = masterDoc.exists ? masterDoc.data().year : null;
 
-    console.log(`[FCM] Token synced and subscribed for: ${email}`);
-    res.json({ success: true, message: "Notification path secured." });
+    // 3. Subscribe to all applicable FCM Topics (Radio Stations)
+    const subscribePromises = [];
+
+    // Everyone gets the global broadcast channel
+    subscribePromises.push(admin.messaging().subscribeToTopic(fcmToken, 'all_students'));
+
+    // Subscribe to their specific year channel — normalize "1st", "Year 1", " 1 " -> year_1
+    if (studentYear) {
+      const cleanYear = String(studentYear).replace(/\D/g, '').trim();
+      if (cleanYear) {
+        subscribePromises.push(admin.messaging().subscribeToTopic(fcmToken, `year_${cleanYear}`));
+      }
+    }
+
+    // Coordinators and Head get the private coordinator channel
+    if (req.user.role === "student_coordinator" || req.user.role === "head") {
+      subscribePromises.push(admin.messaging().subscribeToTopic(fcmToken, 'coordinators'));
+    }
+
+    await Promise.all(subscribePromises);
+
+    console.log(`[FCM] Tuned ${email} into: all_students${studentYear ? `, year_${studentYear}` : ''}${req.user.role === 'student_coordinator' || req.user.role === 'head' ? ', coordinators' : ''}`);
+    res.json({ success: true, message: "Notification channels secured." });
   } catch (error) {
     console.error("FCM Token Sync Error:", error);
     res.status(500).json({ error: "Failed to sync notification token." });
