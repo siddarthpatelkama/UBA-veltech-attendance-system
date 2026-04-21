@@ -1,15 +1,16 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
 import { getAuth, setPersistence, indexedDBLocalPersistence } from "firebase/auth";
-import { getFirestore } from "firebase/firestore"; // Import Firestore
+import { getFirestore } from "firebase/firestore";
+import { getMessaging, isSupported } from "firebase/messaging";
 
 const firebaseConfig = {
-  apiKey: "AIzaSyBpdeLuRXxPs8rk11HNlVpSDKTS3BYHlOg",
-  authDomain: "uba-attendance-3101.firebaseapp.com",
-  projectId: "uba-attendance-3101",
-  storageBucket: "uba-attendance-3101.firebasestorage.app",
-  messagingSenderId: "414761819857",
-  appId: "1:414761819857:web:be3a4fd9e1e8975b15eff0",
-  measurementId: "G-6YLNBCXHFT"
+  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
+  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
+  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
+  measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID
 };
 
 console.log("[FIREBASE] Loading Firebase config...");
@@ -40,5 +41,9 @@ setPersistence(auth, indexedDBLocalPersistence)
 // Export Firestore (db) instance - THIS FIXES THE IMPORT ERROR
 export const db = getFirestore(app);
 console.log("[FIREBASE] Firestore (db) instance created");
+
+// Export Messaging instance (browser-only guard — SSR safe)
+// getMessaging() throws if called on the server, so we only init it in the browser
+export const messaging = typeof window !== "undefined" ? getMessaging(app) : null;
 
 export default app;

@@ -73,4 +73,7 @@ router.post("/admin/crm/promote", verifyToken, adminController.promoteGuest);
 router.post("/admin/crm/demote", verifyToken, adminController.demoteMember);
 router.post("/admin/crm/add-member", verifyToken, adminController.addManualMember);
 
+// --- FCM: Device Token Sync ---
+router.post("/user/update-fcm-token", verifyToken, adminController.updateFcmToken);
+
 module.exports = router;

@@ -121,22 +121,35 @@ exports.demoteToGuest = async (req, res) => {
   }
 };
 // --- ADMIN BROADCAST CENTER & HISTORY ---
-const onesignal = require('../utils/onesignal');
-
 exports.sendBroadcast = async (req, res) => {
   if (req.user.role !== "head") return res.status(403).json({ success: false, message: "Forbidden. Admin access required." });
   try {
     const { targetTopic, title, body } = req.body;
     if (!title || !body) return res.status(400).json({ success: false, message: "Title and Body are required." });
 
-    // 1. Fire the push notification via OneSignal
-    await onesignal.sendNotification(targetTopic || 'all_students', title, body, { type: 'admin_broadcast' });
+    // 1. Fire the push notification via Firebase Cloud Messaging (V1 Topics)
+    const fcmTopic = targetTopic || 'all_students';
+    const message = {
+      notification: { title, body },
+      topic: fcmTopic,
+      android: {
+        priority: 'high',
+        notification: { sound: 'default' }
+      },
+      webpush: {
+        headers: { Urgency: 'high' },
+        notification: { icon: '/uba-logo.png' }
+      }
+    };
+
+    const fcmResponse = await admin.messaging().send(message);
+    console.log(`[FCM] Broadcast sent to topic '${fcmTopic}':`, fcmResponse);
 
     // 2. Save a permanent record to the Database History
     await db.collection("broadcast_history").add({
       title: title,
       body: body,
-      targetTopic: targetTopic || 'all_students',
+      targetTopic: fcmTopic,
       sentBy: req.user.email,
       sentAt: Date.now()
     });
@@ -145,6 +158,31 @@ exports.sendBroadcast = async (req, res) => {
   } catch (error) {
     console.error("Broadcast Error:", error);
     return res.status(500).json({ success: false, message: "Failed to send broadcast." });
+  }
+};
+
+// --- FCM TOKEN SYNC ---
+exports.updateFcmToken = async (req, res) => {
+  try {
+    const { fcmToken } = req.body;
+    const email = req.user.email;
+
+    if (!fcmToken) return res.status(400).json({ error: "FCM token is required." });
+
+    // 1. Save the token to the student's Firestore document
+    await db.collection("users").doc(email).set(
+      { fcmToken, lastTokenUpdate: Date.now() },
+      { merge: true }
+    );
+
+    // 2. Subscribe this device to the 'all_students' FCM topic
+    await admin.messaging().subscribeToTopic(fcmToken, 'all_students');
+
+    console.log(`[FCM] Token synced and subscribed for: ${email}`);
+    res.json({ success: true, message: "Notification path secured." });
+  } catch (error) {
+    console.error("FCM Token Sync Error:", error);
+    res.status(500).json({ error: "Failed to sync notification token." });
   }
 };
 

@@ -34,19 +34,38 @@ const IST_FULL_OPTIONS: Intl.DateTimeFormatOptions = {
 };
 
 export default function AdminPage() {
-  // --- ROSTER LIMIT STATE FOR PAGINATION ---
+  // 1. ALL STATE DECLARATIONS FIRST (to avoid hoisting errors)
+  const [data, setData] = useState<any>({ 
+    meetings: [], 
+    attendance: [], 
+    users: [], 
+    suspiciousLogs: [], 
+    stats: {} 
+  });
   const [rosterLimit, setRosterLimit] = useState(15);
+  const [loading, setLoading] = useState(true);
+  const [initialLoad, setInitialLoad] = useState(true);
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [coordinators, setCoordinators] = useState<string[]>([]);
+  const [coordinatorEmail, setCoordinatorEmail] = useState('');
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const sosFileInputRef = useRef<HTMLInputElement>(null);
   const scheduleFileRef = useRef<HTMLInputElement>(null);
-  
-  const [data, setData] = useState<any>({ meetings: [], attendance: [], users: [], suspiciousLogs: [], stats: {} });
-  const [coordinators, setCoordinators] = useState<string[]>([]);
-  const [coordinatorEmail, setCoordinatorEmail] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [initialLoad, setInitialLoad] = useState(true); 
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
+
+  // 2. MEMOIZED CALCULATIONS (after state declarations)
+  const genderStats = useMemo(() => {
+    if (!data.users || data.users.length === 0) return { boys: 0, girls: 0, total: 0, boyPercent: 0, girlPercent: 0 };
+    const boys = data.users.filter((u: any) => u.gender === 'Male').length;
+    const girls = data.users.filter((u: any) => u.gender === 'Female').length;
+    return {
+      boys,
+      girls,
+      total: data.users.length,
+      boyPercent: (boys / data.users.length) * 100,
+      girlPercent: (girls / data.users.length) * 100
+    };
+  }, [data.users]);
   
   // --- ENTERPRISE NAVIGATION STATE ---
   const [adminTab, setAdminTab] = useState<'operations' | 'roster' | 'schedule' | 'broadcast'>('operations');
@@ -1093,44 +1112,97 @@ export default function AdminPage() {
                   {isAnalytics && (
                     <div className="space-y-6 animate-in fade-in duration-300 bg-gray-50/50 p-5 rounded-2xl mb-4 border border-gray-100">
                       
-                      {/* STAT CARDS (Made slightly more compact) */}
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                        <div className="p-4 rounded-xl bg-blue-50 text-center border border-blue-100 shadow-sm">
-                           <p className="text-[9px] font-black text-blue-400 uppercase mb-1 tracking-widest">Boys</p>
-                           <h4 className="text-2xl md:text-3xl font-black text-blue-600">{stats.gender['Male'] || 0}</h4>
-                        </div>
-                        <div className="p-4 rounded-xl bg-pink-50 text-center border border-pink-100 shadow-sm">
-                           <p className="text-[9px] font-black text-pink-400 uppercase mb-1 tracking-widest">Girls</p>
-                           <h4 className="text-2xl md:text-3xl font-black text-pink-500">{stats.gender['Female'] || 0}</h4>
-                        </div>
-                        <div className="p-4 rounded-xl bg-gray-50 text-center border border-gray-200 shadow-sm">
-                           <p className="text-[9px] font-black text-gray-400 uppercase mb-1 tracking-widest">Unspec</p>
-                           <h4 className="text-2xl md:text-3xl font-black text-gray-500">{stats.gender['Unspecified'] || 0}</h4>
-                        </div>
-                        <div className="p-4 rounded-xl bg-white text-center border border-gray-200 shadow-sm">
-                           <p className="text-[9px] font-black text-[#FF5722] uppercase mb-1 tracking-widest">Total</p>
-                           <h4 className="text-2xl md:text-3xl font-black text-gray-900">{attendees.length}</h4>
-                        </div>
-                      </div>
+                      {/* --- GENDER ANALYTICS HERO SECTION --- */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+                        
+                        {/* NEW SIDE-BY-SIDE CHART CARD */}
+                        {/* FAIL-SAFE GENDER ANALYTICS CARD */}
+                        <div className="bg-white p-8 rounded-[3rem] shadow-xl border border-gray-100 flex flex-col min-h-[400px]">
+                          <div className="mb-8">
+                            <h3 className="text-[10px] font-black text-gray-400 uppercase tracking-[0.3em] mb-2">Demographics</h3>
+                            <h2 className="text-2xl font-black uppercase italic tracking-tighter">Gender Split</h2>
+                          </div>
 
-                      {/* BAR CHART */}
-                      <div className="p-5 rounded-2xl border border-gray-200 bg-white flex items-end justify-between h-40 px-4 md:px-8 gap-2 shadow-sm">
-                        {[1, 2, 3, 4].map(y => {
-                          const yData = stats.years[y.toString()] || { Male: 0, Female: 0, Unspecified: 0, total: 0 };
-                          const maxArr = [1,2,3,4].map(yr => (stats.years[yr.toString()]?.total || 0));
-                          const max = Math.max(...maxArr, 1);
-                          const height = (yData.total / max) * 100;
-                          return (
-                            <div key={y} className="flex-1 flex flex-col items-center gap-2 h-full justify-end group">
-                               <div className="w-8 md:w-12 bg-gray-50 rounded-t-lg overflow-hidden shadow-inner flex flex-col-reverse transition-all duration-500 border border-gray-100" style={{ height: `${Math.max(height, 5)}%` }}>
-                                  <div className="w-full bg-blue-500 transition-all" style={{ height: `${yData.total > 0 ? (yData.Male / yData.total) * 100 : 0}%` }}></div>
-                                  <div className="w-full bg-pink-500 transition-all" style={{ height: `${yData.total > 0 ? (yData.Female / yData.total) * 100 : 0}%` }}></div>
-                                  <div className="w-full bg-gray-300 transition-all" style={{ height: `${yData.total > 0 ? (yData.Unspecified / yData.total) * 100 : 0}%` }}></div>
-                               </div>
-                               <span className="text-[9px] font-black uppercase tracking-widest text-gray-400">Yr {y}</span>
+                          {/* THE CHART AREA */}
+                          <div className="flex-grow flex items-end justify-center gap-12 px-6 pb-4">
+                            {/* BOYS BAR */}
+                            <div className="flex flex-col items-center gap-4 w-full max-w-[80px] group">
+                              <div 
+                                className="w-full bg-blue-500 rounded-2xl shadow-2xl shadow-blue-200 transition-all duration-1000 ease-out relative"
+                                style={{ height: `${Math.max(genderStats.boyPercent, 15)}%` }}
+                              >
+                                <span className="absolute -top-10 left-1/2 -translate-x-1/2 font-black text-blue-600 text-sm opacity-0 group-hover:opacity-100 transition-opacity">
+                                  {Math.round(genderStats.boyPercent)}%
+                                </span>
+                              </div>
+                              <div className="text-center">
+                                <p className="text-[10px] font-black text-blue-500 uppercase tracking-widest mb-1">Boys</p>
+                                <p className="text-2xl font-black text-gray-900">{genderStats.boys}</p>
+                              </div>
                             </div>
-                          );
-                        })}
+
+                            {/* GIRLS BAR */}
+                            <div className="flex flex-col items-center gap-4 w-full max-w-[80px] group">
+                              <div 
+                                className="w-full bg-pink-500 rounded-2xl shadow-2xl shadow-pink-200 transition-all duration-1000 ease-out relative"
+                                style={{ height: `${Math.max(genderStats.girlPercent, 15)}%` }}
+                              >
+                                <span className="absolute -top-10 left-1/2 -translate-x-1/2 font-black text-pink-600 text-sm opacity-0 group-hover:opacity-100 transition-opacity">
+                                  {Math.round(genderStats.girlPercent)}%
+                                </span>
+                              </div>
+                              <div className="text-center">
+                                <p className="text-[10px] font-black text-pink-500 uppercase tracking-widest mb-1">Girls</p>
+                                <p className="text-2xl font-black text-gray-900">{genderStats.girls}</p>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* FOOTER STATS */}
+                          <div className="mt-auto pt-6 border-t border-gray-50 flex justify-between">
+                            <div className="text-center flex-1">
+                              <p className="text-[8px] font-black text-gray-400 uppercase">Ratio</p>
+                              <p className="font-black text-xs text-gray-600">
+                                {genderStats.boys}:{genderStats.girls}
+                              </p>
+                            </div>
+                            <div className="w-px bg-gray-100"></div>
+                            <div className="text-center flex-1">
+                              <p className="text-[8px] font-black text-gray-400 uppercase">Total Members</p>
+                              <p className="font-black text-xs text-gray-600">{genderStats.total}</p>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* YEAR-WISE STATS CARD */}
+                        <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-gray-100 flex flex-col h-full">
+                          <div className="flex justify-between items-start mb-6">
+                            <div>
+                              <h3 className="text-[10px] font-black text-gray-400 uppercase tracking-[0.3em] mb-1">By Year</h3>
+                              <h2 className="text-2xl font-black uppercase italic tracking-tighter text-gray-900">Distribution</h2>
+                            </div>
+                          </div>
+
+                          {/* YEAR-WISE VERTICAL STACKED BAR CHART */}
+                          <div className="flex-grow flex items-end justify-between h-40 px-4 md:px-8 gap-3">
+                            {[1, 2, 3, 4].map(y => {
+                              const yData = stats.years[y.toString()] || { Male: 0, Female: 0, Unspecified: 0, total: 0 };
+                              const maxArr = [1,2,3,4].map(yr => (stats.years[yr.toString()]?.total || 0));
+                              const max = Math.max(...maxArr, 1);
+                              const height = (yData.total / max) * 100;
+                              return (
+                                <div key={y} className="flex-1 flex flex-col items-center gap-2 h-full justify-end group">
+                                   <div className="w-8 md:w-12 bg-gray-50 rounded-t-lg overflow-hidden shadow-inner flex flex-col-reverse transition-all duration-500 border border-gray-100" style={{ height: `${Math.max(height, 5)}%` }}>
+                                      <div className="w-full bg-blue-500 transition-all" style={{ height: `${yData.total > 0 ? (yData.Male / yData.total) * 100 : 0}%` }}></div>
+                                      <div className="w-full bg-pink-500 transition-all" style={{ height: `${yData.total > 0 ? (yData.Female / yData.total) * 100 : 0}%` }}></div>
+                                      <div className="w-full bg-gray-300 transition-all" style={{ height: `${yData.total > 0 ? (yData.Unspecified / yData.total) * 100 : 0}%` }}></div>
+                                   </div>
+                                   <span className="text-[9px] font-black uppercase tracking-widest text-gray-400">Yr {y}</span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
                       </div>
 
                       {/* TABS SYSTEM */}
