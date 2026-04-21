@@ -8,7 +8,7 @@ import { auth } from '@/lib/firebase';
 import { signOut } from 'firebase/auth';
 import QRCode from 'react-qr-code';
 import CryptoJS from 'crypto-js';
-import SubscribeButton from '../components/SubscribeButton';
+
 import { collection, query, where, onSnapshot, orderBy, doc, updateDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
@@ -84,6 +84,8 @@ export default function CoordinatorPage() {
   const [scannerSuccess, setScannerSuccess] = useState('');
   
   const [activeTab, setActiveTab] = useState<'verified' | 'missing' | 'manual' | 'suspicious'>('verified');
+  // Phase viewer: null = show live/active phase, string id = show that closed phase's attendees
+  const [selectedViewPhase, setSelectedViewPhase] = useState<string | null>(null);
   const [confirmEndPhase, setConfirmEndPhase] = useState<boolean>(false);
   const [confirmEndSession, setConfirmEndSession] = useState<string | null>(null);
 
@@ -790,6 +792,7 @@ export default function CoordinatorPage() {
         body: JSON.stringify({ meetingId: selectedMeetingId, phaseTitle: newPhaseTitle })
       });
       setNewPhaseTitle(''); 
+      setSelectedViewPhase(null); // Auto-jump back to live phase view
       fetchData(false);
       showToast("Phase Started!");
     } finally {
@@ -904,7 +907,13 @@ export default function CoordinatorPage() {
   // 🚨 FIX 2: Unified Attendance Query - show all attendance for the meeting, not just current phase
   // 🚨 FIX 1: Only show current phase attendees in tabs
   const allMeetingAttendees = totalDisplayAttendees; // Already filtered by meetingId above
-  const currentPhaseAttendees = activePhase ? allMeetingAttendees.filter(a => a.phaseId === activePhase.id) : allMeetingAttendees;
+  // Determine which phase to display — user can click a closed phase to review it
+  const viewingPhase = selectedViewPhase
+    ? (displayMeeting?.phases || []).find((p: any) => p.id === selectedViewPhase)
+    : activePhase;
+  const currentPhaseAttendees = viewingPhase
+    ? allMeetingAttendees.filter(a => a.phaseId === viewingPhase.id)
+    : allMeetingAttendees;
   const tabVerified = currentPhaseAttendees.filter(a => !a.isOverride);
   const tabManual = currentPhaseAttendees.filter(a => a.isOverride);
   const verifiedVtus = currentPhaseAttendees.map(a => a.vtuNumber || a.vtu);
@@ -913,8 +922,8 @@ export default function CoordinatorPage() {
   // For UI references
   const phaseAttendees = currentPhaseAttendees;
 
-  // 🚨 FIX 4: Phase Analytics Modal state
-  const [selectedPhaseAnalytics, setSelectedPhaseAnalytics] = useState<any>(null);
+  // 🚨 FIX 4: Phase Analytics Modal state (unused — replaced by selectedViewPhase)
+  // const [selectedPhaseAnalytics, setSelectedPhaseAnalytics] = useState<any>(null);
 // 🚨 FIX 3: End Phase Backend Bug - update only the phase status, not the parent meeting status
 const handleEndCurrentPhase = async (meetingId: string, phaseIndexToClose: number) => {
   try {
@@ -1223,15 +1232,6 @@ const handleEndCurrentPhase = async (meetingId: string, phaseIndexToClose: numbe
         )}
 
         <main className="max-w-7xl mx-auto p-4 md:p-6 mt-4 flex flex-col lg:grid lg:grid-cols-12 gap-8">
-                    {/* ⚡ THE NOTIFICATION BUTTON ⚡ */}
-                    <div className="lg:col-span-12 w-full">
-                      <SubscribeButton 
-                        vtu={currentUserData.vtuNumber || myNameRaw || 'COORD'} 
-                        year={currentUserData.year || 'STAFF'} 
-                        dept={currentUserData.dept || 'COORD'} 
-                        role="coordinator" 
-                      />
-                    </div>
           
           {/* EMERGENCY RECOVERY BANNER */}
           {unsyncedEmergencyData.length > 0 && (
@@ -1488,7 +1488,47 @@ const handleEndCurrentPhase = async (meetingId: string, phaseIndexToClose: numbe
                         )}
 
                         <div className="flex flex-col justify-between">
-                          <div className="grid grid-cols-2 gap-4 mb-4">
+                          {/* PHASE HISTORY CHIPS — click to rewind and see that phase's attendees */}
+                        {isVerifiable && (displayMeeting.phases || []).length > 0 && (
+                          <div className="flex flex-wrap gap-2 mb-4">
+                            {(displayMeeting.phases || []).map((p: any) => {
+                              const isActive = p.status === 'active';
+                              const isViewing = selectedViewPhase === p.id || (!selectedViewPhase && isActive);
+                              return (
+                                <button
+                                  key={p.id}
+                                  onClick={() => setSelectedViewPhase(isActive ? null : p.id)}
+                                  className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border-2 transition-all ${
+                                    isViewing
+                                      ? 'bg-[#FF5722] text-white border-[#FF5722] shadow-md'
+                                      : isActive
+                                      ? 'border-[#FF5722] text-[#FF5722] hover:bg-orange-50'
+                                      : 'bg-gray-100 text-gray-500 border-gray-200 hover:border-gray-400'
+                                  }`}
+                                >
+                                  {isActive ? '🔴 ' : '✅ '}{p.title}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+
+                        {/* HISTORICAL PHASE BANNER */}
+                        {selectedViewPhase && (
+                          <div className="flex items-center justify-between bg-blue-50 border border-blue-200 rounded-2xl px-4 py-3 mb-4">
+                            <p className="text-[10px] font-black text-blue-600 uppercase tracking-widest">
+                              📂 Viewing: {(displayMeeting.phases || []).find((p: any) => p.id === selectedViewPhase)?.title || 'Closed Phase'}
+                            </p>
+                            <button
+                              onClick={() => setSelectedViewPhase(null)}
+                              className="text-[9px] font-black text-blue-500 uppercase tracking-widest hover:text-blue-700"
+                            >
+                              ← Back to Live
+                            </button>
+                          </div>
+                        )}
+
+                        <div className="grid grid-cols-2 gap-4 mb-4">
                             <div className="bg-[#111827] p-6 rounded-[2rem] text-center shadow-sm">
                                <h4 className="text-4xl font-black text-white mb-1">{phaseAttendees.length}</h4>
                                <p className="text-[9px] font-black uppercase tracking-widest text-[#FF5722]">Live Count</p>
@@ -1650,41 +1690,25 @@ const handleEndCurrentPhase = async (meetingId: string, phaseIndexToClose: numbe
                         {completedPhases.map((phase:any, idx:number) => {
                            const pAtt = totalDisplayAttendees.filter(a => a.phaseId === phase.id);
                            return (
-                             <div key={idx} onClick={() => setSelectedPhaseAnalytics(phase)} className="p-4 rounded-2xl border border-gray-200 bg-gray-50 flex justify-between items-center shadow-sm cursor-pointer hover:border-orange-300 transition-colors">
+                             <div
+                               key={idx}
+                               onClick={() => {
+                                 setSelectedViewPhase(phase.id);
+                                 window.scrollTo({ top: 200, behavior: 'smooth' });
+                               }}
+                               className="p-4 rounded-2xl border border-gray-200 bg-gray-50 flex justify-between items-center shadow-sm cursor-pointer hover:border-[#FF5722] hover:bg-orange-50 transition-all"
+                             >
                                <div>
                                  <h4 className="font-black text-sm uppercase text-gray-900">{phase.title}</h4>
-                                 <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest mt-1">Closed Checkpoint</p>
+                                 <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest mt-1">Click to view full roster</p>
                                </div>
-                               <div className="bg-white px-4 py-2 rounded-xl border border-gray-100 shadow-sm text-center">
+                               <div className="bg-white px-4 py-2 rounded-xl border border-[#FF5722]/20 shadow-sm text-center">
                                  <span className="font-black text-[#FF5722] text-sm">{pAtt.length}</span>
                                  <span className="text-[10px] font-black text-gray-400">/{manifest.length}</span>
                                </div>
                              </div>
                            );
                         })}
-                              {/* Phase Analytics Modal */}
-                              {selectedPhaseAnalytics && (() => {
-                                const pAtt = totalDisplayAttendees.filter(a => a.phaseId === selectedPhaseAnalytics.id);
-                                return (
-                                  <div className="fixed inset-0 bg-black/60 z-[200] flex items-center justify-center backdrop-blur-sm p-4">
-                                    <div className="bg-white p-8 rounded-[2rem] max-w-sm w-full shadow-2xl animate-in zoom-in">
-                                      <h2 className="text-2xl font-black text-gray-900 uppercase tracking-tight mb-1">{selectedPhaseAnalytics.title}</h2>
-                                      <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-6">Phase Analytics</p>
-                                      <div className="grid grid-cols-2 gap-4 mb-6">
-                                        <div className="bg-green-50 p-4 rounded-xl border border-green-100 text-center">
-                                          <p className="text-3xl font-black text-green-600 mb-1">{pAtt.length}</p>
-                                          <p className="text-[9px] font-black text-green-500 uppercase tracking-widest">Verified</p>
-                                        </div>
-                                        <div className="bg-red-50 p-4 rounded-xl border border-red-100 text-center">
-                                          <p className="text-3xl font-black text-red-500 mb-1">{manifest.length - pAtt.length}</p>
-                                          <p className="text-[9px] font-black text-red-400 uppercase tracking-widest">Missing</p>
-                                        </div>
-                                      </div>
-                                      <button onClick={() => setSelectedPhaseAnalytics(null)} className="w-full bg-gray-100 text-gray-700 font-black py-4 rounded-xl uppercase tracking-widest text-xs hover:bg-gray-200 transition">Close Report</button>
-                                    </div>
-                                  </div>
-                                );
-                              })()}
                       </div>
                     </div>
                   )}

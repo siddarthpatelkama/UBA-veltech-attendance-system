@@ -271,8 +271,14 @@ export default function AdminPage() {
       if (crmTab === 'guests' && !u.isGuest) return false;
       // 2. Gender Filter
       if (crmFilters.gender !== 'All' && u.gender !== crmFilters.gender) return false;
-      // 3. Year Filter
-      if (crmFilters.year !== 'All' && String(u.year) !== crmFilters.year) return false;
+      // 3. 🛡️ BULLETPROOF YEAR FILTER
+      if (crmFilters.year !== 'All') {
+        const safeYear = String(u.year || 'Unknown').trim().toLowerCase();
+        // Catches exact match OR contains the number (e.g. "1st", "Year 1", " 1 ")
+        if (safeYear !== crmFilters.year && !safeYear.includes(crmFilters.year)) {
+          return false;
+        }
+      }
       return true;
     }).sort((a: any, b: any) => b.eventsAttended - a.eventsAttended);
   }, [data.users, data.attendance, crmTab, crmFilters]);
@@ -692,13 +698,41 @@ export default function AdminPage() {
     });
 
     const exportData = data.users.map((u: any) => {
-      const vtu = String(u.vtuNumber);
+      // 1. BULLETPROOF VTU EXTRACTION
+      let vtuStr = String(u.vtuNumber || u.vtu || '').trim();
+      if (vtuStr === 'undefined' || vtuStr === 'null') vtuStr = '';
+      let vtu = vtuStr.replace(/\D/g, '');
+      // Fallback: rip VTU from Name or Email if blank
+      if (!vtu) {
+        if (u.name && u.name.toUpperCase().includes('VTU')) {
+          vtu = u.name.replace(/\D/g, '');
+        } else if (u.email) {
+          vtu = u.email.split('@')[0].replace(/\D/g, '');
+        } else {
+          vtu = 'UNKNOWN';
+        }
+      }
+
+      // 2. CLEAN UP THE NAME
+      let finalName = u.name || 'Unknown';
+      if (finalName === 'undefined') finalName = 'Unknown';
+      // Tag rows where the name is literally the VTU number
+      if (finalName.toUpperCase().includes('VTU') && finalName.length < 12) {
+        finalName = 'Needs Name Update';
+      }
+
+      // 3. CLEAN UP DEPT & YEAR
+      const dept = (u.dept && String(u.dept) !== 'undefined') ? u.dept : 'N/A';
+      const year = (u.year && String(u.year) !== 'undefined') ? u.year : 'N/A';
+
+      // 4. CALCULATE STATS
       const attended = userAttendanceMap[vtu] ? userAttendanceMap[vtu].size : 0;
       const expected = expectedTripsMap[vtu] || 0;
       const percentage = expected === 0 ? (attended > 0 ? 100 : 0) : Math.round((attended / expected) * 100);
+
       return {
-         name: u.name || 'Unknown', vtu: vtu, dept: u.dept || 'N/A', year: u.year || 'N/A',
-         status: u.isGuest ? 'Guest' : 'Member', attended, expected, percentage, strikes: u.strikes || 0
+        name: finalName, vtu, dept, year,
+        status: u.isGuest ? 'Guest' : 'Member', attended, expected, percentage, strikes: u.strikes || 0
       };
     });
 
@@ -736,8 +770,8 @@ export default function AdminPage() {
   const getMeetingStats = (attendeesList: any[]) => {
     return attendeesList.reduce((acc: any, curr: any) => {
       // Find the user in the Master Roster (data.users)
-      const vtuKey = curr.vtuNumber || curr.vtu;
-      const user = (data.users || []).find((u: any) => String(u.vtuNumber) === String(vtuKey));
+      const vtuKey = String(curr.vtuNumber || curr.vtu || '').replace(/\D/g, '');
+      const user = (data.users || []).find((u: any) => String(u.vtuNumber || '').replace(/\D/g, '') === vtuKey);
       
       // Use Master Roster data if available, otherwise fallback to temporary scan data
       const gen = String(user?.gender || curr.gender || 'Unknown').toUpperCase();
@@ -975,12 +1009,14 @@ export default function AdminPage() {
                               onChange={(e) => setBroadcastForm({...broadcastForm, target: e.target.value})}
                               className="flex-1 bg-gray-800/50 border border-gray-700 text-white rounded-xl p-4 font-bold outline-none focus:border-[#FF5722] text-center"
                             >
-                              <option value="all_students">All Students</option>
-                              <option value="year_1">Year 1 Only</option>
-                              <option value="year_2">Year 2 Only</option>
-                              <option value="year_3">Year 3 Only</option>
-                              <option value="year_4">Year 4 Only</option>
-                              <option value="coordinators">Coordinators Only</option>
+                              <optgroup label="📡 Global Radio Channels">
+                                <option value="all_students">All Students</option>
+                                <option value="year_1">Year 1 Only</option>
+                                <option value="year_2">Year 2 Only</option>
+                                <option value="year_3">Year 3 Only</option>
+                                <option value="year_4">Year 4 Only</option>
+                                <option value="coordinators">Coordinators Only</option>
+                              </optgroup>
                             </select>
                           </div>
                           <button 
@@ -1102,10 +1138,6 @@ export default function AdminPage() {
                        <button onClick={() => setAnalyticsViewMap({...analyticsViewMap, [m.id]: !isAnalytics})} className={`px-3 py-2 rounded-lg text-[9px] font-black border transition uppercase shadow-sm tracking-widest ${isAnalytics ? 'bg-gray-900 text-white border-gray-900' : 'text-[#FF5722] border-[#FF5722]/30 bg-orange-50 hover:bg-orange-100'}`}>{isAnalytics ? 'Close Analytics' : 'Analytics'}</button>
                        <button onClick={() => downloadMeetingCSV(m.id, m.title)} className="px-3 py-2 rounded-lg text-[9px] font-black border border-gray-200 hover:bg-gray-50 shadow-sm uppercase tracking-widest text-gray-700">Export</button>
                        <button onClick={() => handleDeleteMeeting(m.id, m.isSOS)} className="px-3 py-2 rounded-lg text-[9px] bg-red-50 font-black text-red-600 hover:bg-red-500 hover:text-white transition shadow-sm border border-red-100 uppercase tracking-widest">Archive</button>
-                       {/* ⚡ REPLACED BUTTON WITH STATUS BADGE */}
-                       <div className="bg-orange-100 text-orange-600 px-6 py-3 rounded-2xl font-black uppercase tracking-widest shadow-sm">
-                         Awaiting Coordinator Activation
-                       </div>
                      </div>
                   </div>
 
@@ -1450,7 +1482,7 @@ export default function AdminPage() {
       <tr key={u.vtuNumber} className="hover:bg-orange-50/30 transition-colors group">
          <td className="p-4">
             <p className="font-black text-sm text-gray-900">{u.name}</p>
-            <p className="text-[10px] font-bold text-gray-400 uppercase">{u.vtuNumber} • {u.dept}</p>
+            <p className="text-[10px] font-bold text-gray-400 uppercase">{u.vtuNumber} • {u.dept || 'NO DEPT'} • YR {u.year || '?'}</p>
          </td>
          <td className="p-4 text-center">
             <span className="bg-white px-3 py-1 rounded-lg border font-black text-orange-600">{u.eventsAttended}</span>
