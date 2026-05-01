@@ -1481,8 +1481,20 @@ export default function AdminPage() {
     .map((u: any) => (
       <tr key={u.vtuNumber} className="hover:bg-orange-50/30 transition-colors group">
          <td className="p-4">
-            <p className="font-black text-sm text-gray-900">{u.name}</p>
-            <p className="text-[10px] font-bold text-gray-400 uppercase">{u.vtuNumber} • {u.dept || 'NO DEPT'} • YR {u.year || '?'}</p>
+            <div className="flex flex-col">
+              <p className="font-black text-sm text-gray-900 flex items-center gap-2">
+                {u.name}
+                {/* 🔔 Show green bell if they have a token, gray slashed bell if not */}
+                {u.fcmToken ? (
+                  <span title="Notifications Enabled" className="text-green-500 text-xs">🔔</span>
+                ) : (
+                  <span title="Notifications Disabled" className="text-gray-300 text-xs">🔕</span>
+                )}
+              </p>
+              <p className="text-[10px] font-bold text-gray-400 uppercase">
+                {u.vtuNumber} • {u.dept || 'NO DEPT'} • YR {u.year || '?'}
+              </p>
+            </div>
          </td>
          <td className="p-4 text-center">
             <span className="bg-white px-3 py-1 rounded-lg border font-black text-orange-600">{u.eventsAttended}</span>
@@ -1535,6 +1547,15 @@ export default function AdminPage() {
                 <h2 className="font-black mb-6 uppercase text-xs tracking-[0.2em] text-orange-500 flex items-center gap-3"><span className="text-2xl">🗓️</span> Schedule Future Event</h2>
                 
                 <input type="text" placeholder="Event Title (e.g. Village Drive)" value={scheduleForm.title} onChange={e => setScheduleForm({...scheduleForm, title: e.target.value})} className="w-full p-4 rounded-xl mb-4 outline-none font-bold text-sm bg-white shadow-sm border border-orange-100" />
+                
+                {/* 📍 NEW VENUE INPUT */}
+                <input 
+                  type="text" 
+                  value={scheduleForm.venue} 
+                  onChange={(e) => setScheduleForm({...scheduleForm, venue: e.target.value})} 
+                  placeholder="Venue (e.g. Main Auditorium / Block 7)" 
+                  className="w-full p-4 rounded-xl mb-4 outline-none font-bold text-sm bg-white shadow-sm border border-orange-100" 
+                />
                 
                 <div className="flex gap-4 mb-4">
                   <input type="date" value={scheduleForm.date} onChange={e => setScheduleForm({...scheduleForm, date: e.target.value})} className="flex-1 p-4 rounded-xl outline-none font-bold text-sm bg-white shadow-sm border border-orange-100 text-gray-600" />
