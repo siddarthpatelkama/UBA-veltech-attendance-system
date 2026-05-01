@@ -138,7 +138,10 @@ exports.sendBroadcast = async (req, res) => {
       },
       webpush: {
         headers: { Urgency: 'high' },
-        notification: { icon: '/uba-logo.png' }
+        notification: { 
+          icon: '/uba-logo.png',
+          badge: '/uba-badge.png'
+        }
       }
     };
 

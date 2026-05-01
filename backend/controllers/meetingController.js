@@ -238,7 +238,14 @@ exports.getMeetings = async (req, res) => {
       usersSnap.docs.forEach(doc => {
         const data = doc.data();
         const vtu = data.vtuNumber || (data.email ? data.email.split('@')[0].replace(/\D/g, '') : undefined);
-        if (vtu && !mergedIdentitiesMap.has(vtu)) mergedIdentitiesMap.set(vtu, { ...data, vtuNumber: vtu });
+        if (vtu) {
+          if (mergedIdentitiesMap.has(vtu)) {
+            // MERGE live user data (FCM Tokens, Device IDs) into the Master Roster profile
+            mergedIdentitiesMap.set(vtu, { ...mergedIdentitiesMap.get(vtu), ...data, vtuNumber: vtu });
+          } else {
+            mergedIdentitiesMap.set(vtu, { ...data, vtuNumber: vtu });
+          }
+        }
       });
       mergedUsers = Array.from(mergedIdentitiesMap.values());
     }
@@ -547,7 +554,13 @@ exports.scheduleMeeting = async (req, res) => {
           body: `Scheduled for ${date || 'TBA'} at ${venue || 'TBA'}. Open the app for details!`,
         },
         android: { priority: 'high' },
-        webpush: { headers: { Urgency: 'high' }, notification: { icon: '/uba-logo.png' } }
+        webpush: { 
+          headers: { Urgency: 'high' }, 
+          notification: { 
+            icon: '/uba-logo.png',
+            badge: '/uba-badge.png'
+          } 
+        }
       };
 
       if (!targetAudience || targetAudience.length === 0) {
