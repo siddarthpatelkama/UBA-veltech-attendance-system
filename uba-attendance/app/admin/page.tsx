@@ -1129,7 +1129,7 @@ export default function AdminPage() {
                      <div>
                        <div className="flex items-center gap-3">
                          <h3 className="font-black text-xl uppercase tracking-tight text-gray-900">{m.isSOS ? `🚨 ${m.title || m.meetingTitle}` : m.title}</h3>
-                         {m.status === 'active' && m.attendanceActive && !m.isSOS && <span className="bg-[#FF5722] text-white text-[8px] font-black px-2 py-0.5 rounded animate-pulse uppercase tracking-widest">Live Now</span>}
+
                          {m.isSOS && <span className="bg-red-600 text-white text-[8px] font-black px-2 py-1 rounded uppercase tracking-widest animate-pulse">SOS</span>}
                        </div>
                        <p className="text-[10px] font-bold text-gray-400 mt-1 uppercase tracking-widest">{m.isSOS ? `🚨 EMERGENCY SESSION BY: ${m.coordinatorEmail || m.syncedBy || 'Unknown'}` : `Host: ${m.createdByName || m.coordinatorId}`}</p>
