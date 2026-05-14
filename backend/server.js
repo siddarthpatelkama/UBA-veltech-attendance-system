@@ -1,3 +1,5 @@
+require("./instrument.js");
+const Sentry = require("@sentry/node");
 const express = require("express");
 const cors = require("cors");
 require("dotenv").config();
@@ -63,6 +65,14 @@ app.get('/keep-alive', async (req, res) => {
 
   res.status(200).send("UBA Server is Online & Warmed Up.");
 });
+
+// 🧪 SENTRY TEST ROUTE
+app.get("/debug-sentry", function mainHandler(req, res) {
+  throw new Error("Backend Sentry is working, Siddarth!");
+});
+
+// 🛡️ SENTRY ERROR HANDLER (must be after all routes)
+Sentry.setupExpressErrorHandler(app);
 
 const http = require('http');
 const PORT = process.env.PORT || 5000;
