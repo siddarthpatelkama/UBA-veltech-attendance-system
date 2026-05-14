@@ -522,8 +522,6 @@ exports.getLiveStats = async (req, res) => {
 
 // --- EVENT SCHEDULING ---
 exports.scheduleMeeting = async (req, res) => {
-  // Add this right at the start of the scheduling function
-  throw new Error("CRITICAL: Meeting scheduler database connection simulated failure!");
   try {
     if (req.user.role !== "head" && req.user.role !== "coordinator" && req.user.role !== "student_coordinator") {
       return res.status(403).json({ success: false, message: "Access denied." });
