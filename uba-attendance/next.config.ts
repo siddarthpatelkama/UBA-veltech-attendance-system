@@ -2,7 +2,7 @@ import { withSentryConfig } from "@sentry/nextjs";
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  output: 'export', // REQUIRED FOR CAPACITOR APK
+  // output: 'export', // REQUIRED FOR CAPACITOR APK
   trailingSlash: true, // REQUIRED FOR CAPACITOR NAVIGATION
   images: {
     unoptimized: true, // NEXT.JS IMAGE OPTIMIZATION DOES NOT WORK IN APKs
