@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Image from 'next/image';
 import { auth } from '@/lib/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 
@@ -71,7 +72,7 @@ export default function NetflixStyleSplash() {
         {phase > 0 && phase < 5 && (
           <div className="flex flex-col items-center w-full px-6">
              <div className={`w-full max-w-sm flex items-center justify-center mb-6 ${phase >= 4 ? 'animate-pop opacity-100' : 'opacity-0'}`}>
-                <img src="/uba-logo.png" className="w-full h-auto object-contain" alt="UBA" />
+                <Image src="/uba-logo.png" className="w-full h-auto object-contain" alt="UBA" width={150} height={80} priority />
              </div>
              
              {/* Text animation with EXTRA SMOOTH transition to orange */}
@@ -89,8 +90,8 @@ export default function NetflixStyleSplash() {
         {/* PHASE 5+: VEL TECH CAMPUS PHOTO (Full un-cropped image) */}
         {phase >= 5 && (
           <div className="flex flex-col items-center animate-pop w-full max-w-md px-6">
-             <div className="w-full mb-6 shadow-2xl">
-                 <img src="/veltech-logo.png" className="w-full h-auto object-contain" alt="Vel Tech Campus" />
+             <div className="w-full mb-6 shadow-2xl flex justify-center">
+                 <Image src="/veltech-logo.png" className="w-full h-auto object-contain" alt="Vel Tech Campus" width={400} height={200} priority />
              </div>
              <h2 className="text-2xl md:text-3xl font-black text-gray-900 uppercase tracking-tighter italic leading-tight text-center">
                 Vel Tech <br/> <span className="text-[#FF5722] text-[10px] tracking-[0.4em] block mt-1">University</span>

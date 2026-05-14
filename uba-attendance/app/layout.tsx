@@ -36,8 +36,8 @@ export const metadata: Metadata = {
     images: ['/uba-logo.png'],
   },
   icons: {
-    icon: '/favicon.ico',
-    apple: '/apple-touch-icon.png',
+    icon: '/uba-logo.png',
+    apple: '/uba-logo.png',
   },
   manifest: '/manifest.json',
 };
