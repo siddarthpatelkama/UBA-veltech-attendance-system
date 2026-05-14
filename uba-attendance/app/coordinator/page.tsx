@@ -221,7 +221,7 @@ export default function CoordinatorPage() {
     // CACHE-FIRST: Skip heavy roster fetch if we already have it locally
     // 🚨 THE FIX: If forceFetch is true (User clicked Refresh), IGNORE the cache!
     const cachedRoster = localStorage.getItem('uba_master_roster');
-    const hasRoster = !forceFetch && cachedRoster && JSON.parse(cachedRoster).length > 0;
+    const hasRoster = !forceSelectLatest && cachedRoster && JSON.parse(cachedRoster).length > 0;
 
     try {
       const [res, emergencyRes] = await Promise.all([
