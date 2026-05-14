@@ -1,6 +1,7 @@
 const admin = require("../firebaseAdmin");
 const db = require("../config/firebase");
 const NodeCache = require("node-cache");
+const Sentry = require("@sentry/node");
 
 // Initialize memory cache (Data expires after 15 minutes to keep it fresh)
 const userCache = new NodeCache({ stdTTL: 900 }); 
@@ -89,6 +90,14 @@ async function verifyToken(req, res, next) {
       currentDeviceId: incomingDeviceId,
       registeredDeviceId: userData.registeredDeviceId 
     };
+
+    // 🛡️ SENTRY USER TAGGING — "Vishnu had an error" instead of "100 users had an error"
+    Sentry.setUser({
+      email: req.user.email,
+      id: req.user.vtuNumber,
+      username: req.user.name,
+      role: req.user.role,
+    });
 
     next();
   } catch (error) {
