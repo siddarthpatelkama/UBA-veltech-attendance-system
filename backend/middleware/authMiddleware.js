@@ -101,6 +101,7 @@ async function verifyToken(req, res, next) {
 
     next();
   } catch (error) {
+    Sentry.captureException(error); // 👈 This is the upgrade!
     console.error("[AUTH] Token verification failed:", error);
     return res.status(401).json({ success: false, message: "Unauthorized" });
   }

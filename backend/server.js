@@ -68,6 +68,12 @@ app.get('/keep-alive', async (req, res) => {
 
 // 🧪 SENTRY TEST ROUTE
 app.get("/debug-sentry", function mainHandler(req, res) {
+  // Send a log before throwing the error
+  Sentry.logger.info('User triggered test error', {
+    action: 'test_error_endpoint',
+  });
+  // Send a test metric before throwing the error
+  Sentry.metrics.count('test_counter', 1);
   throw new Error("Backend Sentry is working, Siddarth!");
 });
 
