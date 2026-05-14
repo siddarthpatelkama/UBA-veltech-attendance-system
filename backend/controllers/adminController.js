@@ -129,6 +129,8 @@ exports.sendBroadcast = async (req, res) => {
 
     // 1. Fire the push notification via Firebase Cloud Messaging (V1 Topics)
     const fcmTopic = targetTopic || 'all_students';
+    const FRONTEND_URL = "https://uba-veltech-attendance-system.vercel.app";
+
     const message = {
       notification: { title, body },
       topic: fcmTopic,
@@ -139,8 +141,11 @@ exports.sendBroadcast = async (req, res) => {
       webpush: {
         headers: { Urgency: 'high' },
         notification: { 
-          icon: '/uba-logo.png',
-          badge: '/uba-badge.png'
+          icon: `${FRONTEND_URL}/uba-logo.png`,
+          badge: `${FRONTEND_URL}/uba-badge.png`
+        },
+        fcm_options: {
+          link: FRONTEND_URL
         }
       }
     };

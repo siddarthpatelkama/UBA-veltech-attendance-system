@@ -548,18 +548,26 @@ exports.scheduleMeeting = async (req, res) => {
     const docRef = await db.collection("meetings").add(meetingData);
     // --- AUTOMATED FCM NOTIFICATION TRIGGER ---
     try {
+      const FRONTEND_URL = "https://uba-veltech-attendance-system.vercel.app";
+
       const notificationPayload = {
         notification: {
           title: `📅 New Event: ${title}`,
           body: `Scheduled for ${date || 'TBA'} at ${venue || 'TBA'}. Open the app for details!`,
         },
-        android: { priority: 'high' },
+        android: { 
+          priority: 'high', 
+          notification: { sound: 'default' } 
+        },
         webpush: { 
           headers: { Urgency: 'high' }, 
           notification: { 
-            icon: '/uba-logo.png',
-            badge: '/uba-badge.png'
-          } 
+            icon: `${FRONTEND_URL}/uba-logo.png`,
+            badge: `${FRONTEND_URL}/uba-badge.png`
+          },
+          fcm_options: {
+            link: FRONTEND_URL
+          }
         }
       };
 
