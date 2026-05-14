@@ -1112,6 +1112,20 @@ export default function AdminPage() {
               const suspicious = (data.suspiciousLogs || []).filter((s:any) => s.meetingId === m.id);
               const manifest = m.manifest || [];
               const stats = getMeetingStats(attendees);
+
+              // 🛠️ NORMALIZED MEETING STATS (VTU Handshake Fix)
+              const meetingStats = attendees.reduce((acc: any, curr: any) => {
+                const cleanVtu = String(curr.vtuNumber || '').replace(/\D/g, '');
+                const user = (data.users || []).find((u: any) => String(u.vtuNumber).replace(/\D/g, '') === cleanVtu);
+                const gen = (user?.gender || curr.gender || 'Unknown').toLowerCase();
+                const rawYear = String(user?.year || curr.year || '0').replace(/\D/g, '');
+                if (gen === 'male') acc.boys++;
+                else if (gen === 'female') acc.girls++;
+                if (['1', '2', '3', '4'].includes(rawYear)) acc.years[`Yr ${rawYear}`]++;
+                return acc;
+              }, { boys: 0, girls: 0, years: { 'Yr 1': 0, 'Yr 2': 0, 'Yr 3': 0, 'Yr 4': 0 } });
+              const chartData = Object.keys(meetingStats.years).map(yr => ({ name: yr, count: meetingStats.years[yr] }));
+              const maxChartVal = Math.max(...chartData.map(d => d.count), 1);
               
               const isAnalytics = analyticsViewMap[m.id] || false;
               const activeTab = tabMap[m.id] || 'verified';
@@ -1143,192 +1157,107 @@ export default function AdminPage() {
                   </div>
 
                   {isAnalytics && (
-                    <div className="space-y-6 animate-in fade-in duration-300 bg-gray-50/50 p-5 rounded-2xl mb-4 border border-gray-100">
+                    <div className="space-y-8 animate-in fade-in duration-300 bg-[#F9F9F9] rounded-[40px] p-8 border border-gray-200 mt-4 shadow-inner">
                       
-                      {/* --- GENDER ANALYTICS HERO SECTION --- */}
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-                        
-                        {/* NEW SIDE-BY-SIDE CHART CARD */}
-                        {/* FAIL-SAFE GENDER ANALYTICS CARD */}
-                        <div className="bg-white p-8 rounded-[3rem] shadow-xl border border-gray-100 flex flex-col min-h-[400px]">
-                          <div className="mb-8">
-                            <h3 className="text-[10px] font-black text-gray-400 uppercase tracking-[0.3em] mb-2">Demographics</h3>
-                            <h2 className="text-2xl font-black uppercase italic tracking-tighter">Gender Split</h2>
-                          </div>
-
-                          {/* THE CHART AREA */}
-                          <div className="flex-grow flex items-end justify-center gap-12 px-6 pb-4">
-                            {/* BOYS BAR */}
-                            <div className="flex flex-col items-center gap-4 w-full max-w-[80px] group">
-                              <div 
-                                className="w-full bg-blue-500 rounded-2xl shadow-2xl shadow-blue-200 transition-all duration-1000 ease-out relative"
-                                style={{ height: `${Math.max(genderStats.boyPercent, 15)}%` }}
-                              >
-                                <span className="absolute -top-10 left-1/2 -translate-x-1/2 font-black text-blue-600 text-sm opacity-0 group-hover:opacity-100 transition-opacity">
-                                  {Math.round(genderStats.boyPercent)}%
-                                </span>
-                              </div>
-                              <div className="text-center">
-                                <p className="text-[10px] font-black text-blue-500 uppercase tracking-widest mb-1">Boys</p>
-                                <p className="text-2xl font-black text-gray-900">{genderStats.boys}</p>
-                              </div>
-                            </div>
-
-                            {/* GIRLS BAR */}
-                            <div className="flex flex-col items-center gap-4 w-full max-w-[80px] group">
-                              <div 
-                                className="w-full bg-pink-500 rounded-2xl shadow-2xl shadow-pink-200 transition-all duration-1000 ease-out relative"
-                                style={{ height: `${Math.max(genderStats.girlPercent, 15)}%` }}
-                              >
-                                <span className="absolute -top-10 left-1/2 -translate-x-1/2 font-black text-pink-600 text-sm opacity-0 group-hover:opacity-100 transition-opacity">
-                                  {Math.round(genderStats.girlPercent)}%
-                                </span>
-                              </div>
-                              <div className="text-center">
-                                <p className="text-[10px] font-black text-pink-500 uppercase tracking-widest mb-1">Girls</p>
-                                <p className="text-2xl font-black text-gray-900">{genderStats.girls}</p>
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* FOOTER STATS */}
-                          <div className="mt-auto pt-6 border-t border-gray-50 flex justify-between">
-                            <div className="text-center flex-1">
-                              <p className="text-[8px] font-black text-gray-400 uppercase">Ratio</p>
-                              <p className="font-black text-xs text-gray-600">
-                                {genderStats.boys}:{genderStats.girls}
-                              </p>
-                            </div>
-                            <div className="w-px bg-gray-100"></div>
-                            <div className="text-center flex-1">
-                              <p className="text-[8px] font-black text-gray-400 uppercase">Total Members</p>
-                              <p className="font-black text-xs text-gray-600">{genderStats.total}</p>
-                            </div>
-                          </div>
+                      {/* 1. TOP STATS GRID */}
+                      <div className="grid grid-cols-3 gap-4">
+                        <div className="bg-[#F0F4F8] p-6 rounded-[25px] text-center border border-white shadow-sm transition-transform hover:scale-105">
+                          <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Boys</p>
+                          <p className="text-4xl font-black text-blue-500">{meetingStats.boys}</p>
                         </div>
-
-                        {/* YEAR-WISE STATS CARD (CUSTOM THEME) */}
-                        <div className="bg-white p-8 rounded-[3rem] shadow-xl border-2 border-[#FF5722]/10 flex flex-col h-full min-h-[400px]">
-                          <div className="flex justify-between items-start mb-8 border-b border-gray-50 pb-4">
-                            <div>
-                              <h3 className="text-[10px] font-black text-[#FF5722] uppercase tracking-[0.3em] mb-1">By Year</h3>
-                              <h2 className="text-2xl font-black uppercase italic tracking-tighter text-gray-900">Demographics</h2>
-                            </div>
-                            {/* ADVANCED LEGEND - ORANGE, GREY, GREEN */}
-                            <div className="flex gap-3 items-center text-[9px] font-black uppercase tracking-widest text-gray-400">
-                               <div className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-[#FF5722] shadow-sm"></span> M</div>
-                               <div className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-gray-300 shadow-sm"></span> Unspec</div>
-                               <div className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-[#138808] shadow-sm"></span> F</div>
-                            </div>
-                          </div>
-
-                          {/* ⚡ ADVANCED SIDE-BY-SIDE CHART (REORDERED) */}
-                          <div className="flex-grow flex items-end justify-between h-48 px-2 gap-4 md:gap-8">
-                            {[1, 2, 3, 4].map(y => {
-                              const yData = stats.years[y.toString()] || { Male: 0, Female: 0, Unspecified: 0, total: 0 };
-                              
-                              let maxVal = 1;
-                              [1,2,3,4].forEach(yr => {
-                                const yrStats = stats.years[yr.toString()] || { Male: 0, Female: 0, Unspecified: 0 };
-                                maxVal = Math.max(maxVal, yrStats.Male, yrStats.Female, yrStats.Unspecified);
-                              });
-
-                              const heightM = (yData.Male / maxVal) * 100;
-                              const heightF = (yData.Female / maxVal) * 100;
-                              const heightU = (yData.Unspecified / maxVal) * 100;
-
-                              return (
-                                <div key={y} className="flex-1 flex flex-col items-center gap-2 h-full justify-end group">
-                                   <div className="w-full flex items-end justify-center gap-1.5 h-full relative">
-                                      
-                                      {/* Male Bar (Orange) */}
-                                      <div className="w-1/3 max-w-[16px] bg-[#FF5722] rounded-t-xl transition-all duration-700 relative group/bar hover:bg-orange-600 cursor-pointer shadow-md" style={{ height: `${Math.max(heightM, 2)}%` }}>
-                                         <span className="absolute -top-7 left-1/2 -translate-x-1/2 font-black text-[10px] text-[#FF5722] opacity-0 group-hover/bar:opacity-100 transition-all bg-orange-50 px-2 py-0.5 rounded-md shadow-sm z-10">{yData.Male}</span>
-                                      </div>
-                                      
-                                      {/* Unspecified Bar (Grey) */}
-                                      <div className="w-1/3 max-w-[16px] bg-gray-300 rounded-t-xl transition-all duration-700 relative group/bar hover:bg-gray-400 cursor-pointer shadow-sm" style={{ height: `${Math.max(heightU, 2)}%` }}>
-                                         <span className="absolute -top-7 left-1/2 -translate-x-1/2 font-black text-[10px] text-gray-600 opacity-0 group-hover/bar:opacity-100 transition-all bg-gray-100 px-2 py-0.5 rounded-md shadow-sm z-10">{yData.Unspecified}</span>
-                                      </div>
-                                      
-                                      {/* Female Bar (Indian Flag Green) */}
-                                      <div className="w-1/3 max-w-[16px] bg-[#138808] rounded-t-xl transition-all duration-700 relative group/bar hover:bg-green-700 cursor-pointer shadow-md" style={{ height: `${Math.max(heightF, 2)}%` }}>
-                                         <span className="absolute -top-7 left-1/2 -translate-x-1/2 font-black text-[10px] text-[#138808] opacity-0 group-hover/bar:opacity-100 transition-all bg-green-50 px-2 py-0.5 rounded-md shadow-sm z-10">{yData.Female}</span>
-                                      </div>
-                                      
-                                   </div>
-                                   <span className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-500 mt-3 border-t border-gray-100 pt-3 w-full text-center">Yr {y}</span>
-                                </div>
-                              );
-                            })}
-                          </div>
+                        <div className="bg-[#FFF0F3] p-6 rounded-[25px] text-center border border-white shadow-sm transition-transform hover:scale-105">
+                          <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Girls</p>
+                          <p className="text-4xl font-black text-pink-500">{meetingStats.girls}</p>
+                        </div>
+                        <div className="bg-white p-6 rounded-[25px] text-center border border-gray-100 shadow-sm transition-transform hover:scale-105">
+                          <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Total</p>
+                          <p className="text-4xl font-black text-gray-800">{attendees.length}</p>
                         </div>
                       </div>
 
-                      {/* TABS SYSTEM */}
-                      <div className="border-t border-gray-200 pt-5">
-                        <div className="flex overflow-x-auto border-b border-gray-200 mb-3 shrink-0 no-scrollbar gap-2 pb-2">
-                          <button onClick={() => setTab('verified')} className={`flex-1 py-2 px-3 font-black text-[9px] uppercase tracking-widest transition-all whitespace-nowrap rounded-lg ${activeTab === 'verified' ? 'text-white bg-[#111827] shadow-sm' : 'text-gray-500 bg-white hover:bg-gray-100 border border-gray-200'}`}>Verified ({tabVerified.length})</button>
-                          {m.type === 'verifiable' && <button onClick={() => setTab('missing')} className={`flex-1 py-2 px-3 font-black text-[9px] uppercase tracking-widest transition-all whitespace-nowrap rounded-lg ${activeTab === 'missing' ? 'text-white bg-red-500 shadow-sm' : 'text-red-500 bg-red-50 hover:bg-red-100 border border-red-100'}`}>Abandoned ({tabMissing.length})</button>}
-                          <button onClick={() => setTab('manual')} className={`flex-1 py-2 px-3 font-black text-[9px] uppercase tracking-widest transition-all whitespace-nowrap rounded-lg ${activeTab === 'manual' ? 'text-gray-900 border border-gray-900 bg-white shadow-sm' : 'text-gray-500 bg-white hover:bg-gray-100 border border-gray-200'}`}>Manual ({tabManual.length})</button>
-                          <button onClick={() => setTab('suspicious')} className={`flex-1 py-2 px-3 font-black text-[9px] uppercase tracking-widest transition-all whitespace-nowrap rounded-lg ${activeTab === 'suspicious' ? 'text-purple-700 bg-purple-200 shadow-sm border border-purple-300' : 'text-purple-500 bg-purple-50 hover:bg-purple-100 border border-purple-100'}`}>Suspicious ({suspicious.length})</button>
-                        </div>
+                      {/* 2. BAR CHART SECTION (The 4-Year Breakdown) */}
+                      <div className="bg-gray-50/50 rounded-[30px] p-8 border border-gray-100 h-56 relative overflow-hidden flex items-end justify-around gap-4">
+                        {chartData.map((entry, index) => (
+                          <div key={index} className="flex-1 flex flex-col items-center justify-end h-full gap-2">
+                            <span className="text-xs font-black text-pink-600">{entry.count > 0 ? entry.count : ''}</span>
+                            <div 
+                              className="w-full max-w-[60px] rounded-[12px] transition-all duration-700 ease-out"
+                              style={{ 
+                                height: `${Math.max((entry.count / maxChartVal) * 100, 4)}%`,
+                                backgroundColor: entry.count > 0 ? '#E91E63' : '#E5E7EB'
+                              }}
+                            />
+                            <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest mt-1">{entry.name}</span>
+                          </div>
+                        ))}
+                      </div>
 
-                        <div className="grid md:grid-cols-2 gap-2 max-h-[240px] overflow-y-auto pr-2 custom-scrollbar">
-                          {activeTab === 'verified' && tabVerified.map((at:any, i:number) => {
-                           const dbUser = (data.users || []).find((u:any)=>String(u.vtuNumber) === String(at.vtuNumber));
-                           return (
-                             <div key={i} onClick={() => setSelectedStudent({...at, studentName: dbUser?.name || at.studentName || 'Unknown', userData: dbUser || at.userData || {}, dept: dbUser?.dept || at.dept || 'N/A', year: dbUser?.year || at.year || 'N/A', gender: dbUser?.gender || at.gender || 'N/A'})} className="p-3 rounded-xl border border-gray-200 bg-white flex justify-between items-center shadow-sm hover:border-[#FF5722] cursor-pointer">
-                               <div className="overflow-hidden pr-2"><p className="font-bold text-xs text-gray-900 capitalize truncate">{at.studentName}</p><p className="text-[9px] font-mono font-black text-[#FF5722] mt-0.5">{at.vtuNumber}</p></div>
-                             </div>
-                           );
-                          })}
+                      {/* 3. BOTTOM TABS SYSTEM */}
+                      <div className="flex justify-center gap-10 border-t border-gray-100 pt-8">
+                        <button onClick={() => setTab('verified')} className={`text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'verified' ? 'text-gray-900 border-b-2 border-black pb-1' : 'text-gray-400'}`}>
+                          Verified ({tabVerified.length})
+                        </button>
+                        <button onClick={() => setTab('manual')} className={`text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'manual' ? 'text-gray-900 border-b-2 border-black pb-1' : 'text-gray-400'}`}>
+                          Manual ({tabManual.length})
+                        </button>
+                        <button onClick={() => setTab('suspicious')} className={`text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'suspicious' ? 'text-purple-600 border-b-2 border-purple-600 pb-1' : 'text-purple-300'}`}>
+                          Suspicious ({suspicious.length})
+                        </button>
+                      </div>
 
-                          {activeTab === 'missing' && tabMissing.map((m:any, i:number) => {
-                           const dbUser = (data.users || []).find((u:any)=>String(u.vtuNumber) === String(m.vtu));
-                           return (
-                             <div key={i} onClick={() => setSelectedStudent({studentName: dbUser?.name || m.name || 'Unknown', vtuNumber: m.vtu, userData: dbUser || {}, dept: dbUser?.dept || 'N/A', year: dbUser?.year || 'N/A', gender: dbUser?.gender || 'N/A'})} className="p-3 rounded-xl border border-red-200 bg-red-50 flex justify-between items-center shadow-sm hover:bg-red-100 cursor-pointer">
-                               <div className="overflow-hidden pr-2"><p className="font-bold text-xs text-red-900 capitalize truncate">{m.name}</p><p className="text-[9px] font-mono font-black text-red-500 mt-0.5">{m.vtu}</p></div>
-                               <span className="shrink-0 text-[8px] px-2 py-1 bg-red-600 text-white font-black rounded uppercase tracking-widest">Missing</span>
-                             </div>
-                           );
-                          })}
+                      {/* 4. TAB CONTENT LOG */}
+                      <div className="grid md:grid-cols-2 gap-3 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
+                        {activeTab === 'verified' && tabVerified.map((at:any, i:number) => {
+                          const dbUser = (data.users || []).find((u:any) => String(u.vtuNumber).replace(/\D/g, '') === String(at.vtuNumber).replace(/\D/g, ''));
+                          return (
+                            <div key={i} onClick={() => setSelectedStudent({...at, studentName: dbUser?.name || at.studentName || 'Unknown', userData: dbUser || at.userData || {}, dept: dbUser?.dept || at.dept || 'N/A', year: dbUser?.year || at.year || 'N/A', gender: dbUser?.gender || at.gender || 'N/A'})} className="p-4 rounded-2xl bg-white border border-gray-100 flex justify-between items-center shadow-sm hover:border-[#FF5722] cursor-pointer group">
+                              <div className="overflow-hidden pr-2">
+                                <p className="font-black text-xs text-gray-900 group-hover:text-[#FF5722] capitalize truncate">{dbUser?.name || at.studentName || 'Unknown'}</p>
+                                <p className="text-[9px] font-mono font-bold text-gray-400">{at.vtuNumber}</p>
+                              </div>
+                              <span className="text-[8px] px-2 py-1 bg-green-50 text-green-600 font-black rounded uppercase shrink-0">Verified</span>
+                            </div>
+                          );
+                        })}
 
-                          {activeTab === 'manual' && tabManual.map((at:any, i:number) => {
-                           const dbUser = (data.users || []).find((u:any)=>String(u.vtuNumber) === String(at.vtuNumber));
-                           return (
-                             <div key={i} onClick={() => setSelectedStudent({...at, studentName: dbUser?.name || at.studentName || 'Unknown', userData: dbUser || at.userData || {}, dept: dbUser?.dept || at.dept || 'N/A', year: dbUser?.year || at.year || 'N/A', gender: dbUser?.gender || at.gender || 'N/A'})} className="p-3 rounded-xl border border-orange-200 bg-orange-50 flex justify-between items-center cursor-pointer hover:border-orange-300">
-                               <div className="overflow-hidden pr-2"><p className="font-bold text-xs text-gray-900 capitalize truncate">{at.studentName}</p><p className="text-[9px] font-mono font-black text-gray-500 mt-0.5">{at.vtuNumber}</p></div>
-                               <div className="text-right shrink-0"><p className="text-[8px] bg-orange-500 text-white px-2 py-1 rounded font-black uppercase tracking-widest mb-0.5 inline-block">Manual</p><p className="text-[8px] font-bold text-orange-400 italic block truncate w-16">By {at.enteredBy?.split('@')[0]}</p></div>
-                             </div>
-                           );
-                          })}
-
-                          {activeTab === 'suspicious' && suspicious.map((log: any, i: number) => (
-                            <div key={i} className="p-3 bg-purple-50 border border-purple-200 rounded-xl flex justify-between items-center col-span-1 md:col-span-2 shadow-sm">
-                              <div className="overflow-hidden">
-                                <p className="text-[9px] font-black text-purple-700 uppercase tracking-widest mb-1 flex items-center gap-1"><span className="text-sm">🚨</span> Proxy Blocked</p>
-                                <div className="flex gap-3">
-                                  <p className="text-[8px] font-bold text-gray-500 uppercase truncate">Input: <span className="font-mono text-black font-black">{log.proxyVtu}</span></p>
-                                  <p className="text-[8px] font-bold text-gray-500 uppercase border-l border-purple-200 pl-3 truncate">Owner: <span className="font-mono text-black font-black">{log.originalVtu}</span></p>
-                                </div>
+                        {activeTab === 'manual' && tabManual.map((at:any, i:number) => {
+                          const dbUser = (data.users || []).find((u:any) => String(u.vtuNumber).replace(/\D/g, '') === String(at.vtuNumber).replace(/\D/g, ''));
+                          return (
+                            <div key={i} onClick={() => setSelectedStudent({...at, studentName: dbUser?.name || at.studentName || 'Unknown', userData: dbUser || at.userData || {}, dept: dbUser?.dept || at.dept || 'N/A', year: dbUser?.year || at.year || 'N/A', gender: dbUser?.gender || at.gender || 'N/A'})} className="p-4 rounded-2xl bg-orange-50 border border-orange-200 flex justify-between items-center cursor-pointer hover:border-orange-400 group">
+                              <div className="overflow-hidden pr-2">
+                                <p className="font-black text-xs text-gray-900 capitalize truncate">{dbUser?.name || at.studentName || 'Unknown'}</p>
+                                <p className="text-[9px] font-mono font-bold text-gray-400">{at.vtuNumber}</p>
+                              </div>
+                              <div className="text-right shrink-0">
+                                <p className="text-[8px] bg-orange-500 text-white px-2 py-1 rounded font-black uppercase tracking-widest mb-0.5 inline-block">Manual</p>
+                                <p className="text-[8px] font-bold text-orange-400 italic block truncate w-16">By {at.enteredBy?.split('@')[0]}</p>
                               </div>
                             </div>
-                          ))}
+                          );
+                        })}
 
-                          {((activeTab === 'verified' && tabVerified.length === 0) || 
-                            (activeTab === 'missing' && tabMissing.length === 0) || 
-                            (activeTab === 'manual' && tabManual.length === 0) || 
-                            (activeTab === 'suspicious' && suspicious.length === 0)) && 
-                            <div className="col-span-1 md:col-span-2 py-8 flex flex-col items-center justify-center border border-dashed border-gray-200 rounded-2xl bg-white">
-                              <p className="text-gray-400 text-[9px] font-black uppercase tracking-widest text-center">No data found</p>
+                        {activeTab === 'suspicious' && suspicious.map((log: any, i: number) => (
+                          <div key={i} className="p-4 bg-purple-50 border border-purple-200 rounded-2xl flex justify-between items-center col-span-1 md:col-span-2 shadow-sm">
+                            <div className="overflow-hidden">
+                              <p className="text-[9px] font-black text-purple-700 uppercase tracking-widest mb-1 flex items-center gap-1"><span className="text-sm">🚨</span> Proxy Blocked</p>
+                              <div className="flex gap-3">
+                                <p className="text-[8px] font-bold text-gray-500 uppercase truncate">Input: <span className="font-mono text-black font-black">{log.proxyVtu}</span></p>
+                                <p className="text-[8px] font-bold text-gray-500 uppercase border-l border-purple-200 pl-3 truncate">Owner: <span className="font-mono text-black font-black">{log.originalVtu}</span></p>
+                              </div>
                             </div>
-                          }
-                        </div>
+                          </div>
+                        ))}
+
+                        {((activeTab === 'verified' && tabVerified.length === 0) || 
+                          (activeTab === 'manual' && tabManual.length === 0) || 
+                          (activeTab === 'suspicious' && suspicious.length === 0)) && 
+                          <div className="col-span-1 md:col-span-2 py-8 flex flex-col items-center justify-center border border-dashed border-gray-200 rounded-2xl bg-white">
+                            <p className="text-gray-400 text-[9px] font-black uppercase tracking-widest text-center">No data found</p>
+                          </div>
+                        }
                       </div>
                     </div>
                   )}
-
                   {!isAnalytics && (
                     // FIX 4: Compact Grid (3 cols on large screens), smaller cards, custom manual backgrounds
                     <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-2 max-h-[200px] overflow-y-auto pr-2 custom-scrollbar">
