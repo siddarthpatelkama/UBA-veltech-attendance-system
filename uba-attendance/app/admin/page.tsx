@@ -184,8 +184,9 @@ export default function AdminPage() {
     if (!token) return;
 
     // CACHE-FIRST: Skip heavy roster fetch if we already have it locally
+    // 🚨 THE FIX: If forceFetch is true (User clicked Refresh), IGNORE the cache!
     const cachedRoster = localStorage.getItem('uba_master_roster');
-    const hasRoster = cachedRoster && JSON.parse(cachedRoster).length > 0;
+    const hasRoster = !forceFetch && cachedRoster && JSON.parse(cachedRoster).length > 0;
     
     try {
       const [coordRes, reportRes, emergencyRes] = await Promise.all([
@@ -262,7 +263,7 @@ export default function AdminPage() {
       return {
         ...u,
         eventsAttended: attendanceMap[normVTU] || 0,
-        //  FIX: If they are in the list, assume they are members unless isGuest is EXACTLY true
+        //  FIX: If they are in the list, assume they are members unless isGuest is EXACTLY true
         isGuest: u.isGuest === true 
       };
     }).filter((u: any) => {
@@ -1128,7 +1129,7 @@ export default function AdminPage() {
                      <div>
                        <div className="flex items-center gap-3">
                          <h3 className="font-black text-xl uppercase tracking-tight text-gray-900">{m.isSOS ? `🚨 ${m.title || m.meetingTitle}` : m.title}</h3>
-                         {m.status === 'active' && !m.isSOS && <span className="bg-[#FF5722] text-white text-[8px] font-black px-2 py-0.5 rounded animate-pulse uppercase tracking-widest">Live Now</span>}
+                         {m.status === 'active' && m.attendanceActive && !m.isSOS && <span className="bg-[#FF5722] text-white text-[8px] font-black px-2 py-0.5 rounded animate-pulse uppercase tracking-widest">Live Now</span>}
                          {m.isSOS && <span className="bg-red-600 text-white text-[8px] font-black px-2 py-1 rounded uppercase tracking-widest animate-pulse">SOS</span>}
                        </div>
                        <p className="text-[10px] font-bold text-gray-400 mt-1 uppercase tracking-widest">{m.isSOS ? `🚨 EMERGENCY SESSION BY: ${m.coordinatorEmail || m.syncedBy || 'Unknown'}` : `Host: ${m.createdByName || m.coordinatorId}`}</p>
@@ -1206,30 +1207,57 @@ export default function AdminPage() {
                           </div>
                         </div>
 
-                        {/* YEAR-WISE STATS CARD */}
-                        <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-gray-100 flex flex-col h-full">
-                          <div className="flex justify-between items-start mb-6">
+                        {/* YEAR-WISE STATS CARD (CUSTOM THEME) */}
+                        <div className="bg-white p-8 rounded-[3rem] shadow-xl border-2 border-[#FF5722]/10 flex flex-col h-full min-h-[400px]">
+                          <div className="flex justify-between items-start mb-8 border-b border-gray-50 pb-4">
                             <div>
-                              <h3 className="text-[10px] font-black text-gray-400 uppercase tracking-[0.3em] mb-1">By Year</h3>
-                              <h2 className="text-2xl font-black uppercase italic tracking-tighter text-gray-900">Distribution</h2>
+                              <h3 className="text-[10px] font-black text-[#FF5722] uppercase tracking-[0.3em] mb-1">By Year</h3>
+                              <h2 className="text-2xl font-black uppercase italic tracking-tighter text-gray-900">Demographics</h2>
+                            </div>
+                            {/* ADVANCED LEGEND - ORANGE, GREY, GREEN */}
+                            <div className="flex gap-3 items-center text-[9px] font-black uppercase tracking-widest text-gray-400">
+                               <div className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-[#FF5722] shadow-sm"></span> M</div>
+                               <div className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-gray-300 shadow-sm"></span> Unspec</div>
+                               <div className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-[#138808] shadow-sm"></span> F</div>
                             </div>
                           </div>
 
-                          {/* YEAR-WISE VERTICAL STACKED BAR CHART */}
-                          <div className="flex-grow flex items-end justify-between h-40 px-4 md:px-8 gap-3">
+                          {/* ⚡ ADVANCED SIDE-BY-SIDE CHART (REORDERED) */}
+                          <div className="flex-grow flex items-end justify-between h-48 px-2 gap-4 md:gap-8">
                             {[1, 2, 3, 4].map(y => {
                               const yData = stats.years[y.toString()] || { Male: 0, Female: 0, Unspecified: 0, total: 0 };
-                              const maxArr = [1,2,3,4].map(yr => (stats.years[yr.toString()]?.total || 0));
-                              const max = Math.max(...maxArr, 1);
-                              const height = (yData.total / max) * 100;
+                              
+                              let maxVal = 1;
+                              [1,2,3,4].forEach(yr => {
+                                const yrStats = stats.years[yr.toString()] || { Male: 0, Female: 0, Unspecified: 0 };
+                                maxVal = Math.max(maxVal, yrStats.Male, yrStats.Female, yrStats.Unspecified);
+                              });
+
+                              const heightM = (yData.Male / maxVal) * 100;
+                              const heightF = (yData.Female / maxVal) * 100;
+                              const heightU = (yData.Unspecified / maxVal) * 100;
+
                               return (
                                 <div key={y} className="flex-1 flex flex-col items-center gap-2 h-full justify-end group">
-                                   <div className="w-8 md:w-12 bg-gray-50 rounded-t-lg overflow-hidden shadow-inner flex flex-col-reverse transition-all duration-500 border border-gray-100" style={{ height: `${Math.max(height, 5)}%` }}>
-                                      <div className="w-full bg-blue-500 transition-all" style={{ height: `${yData.total > 0 ? (yData.Male / yData.total) * 100 : 0}%` }}></div>
-                                      <div className="w-full bg-pink-500 transition-all" style={{ height: `${yData.total > 0 ? (yData.Female / yData.total) * 100 : 0}%` }}></div>
-                                      <div className="w-full bg-gray-300 transition-all" style={{ height: `${yData.total > 0 ? (yData.Unspecified / yData.total) * 100 : 0}%` }}></div>
+                                   <div className="w-full flex items-end justify-center gap-1.5 h-full relative">
+                                      
+                                      {/* Male Bar (Orange) */}
+                                      <div className="w-1/3 max-w-[16px] bg-[#FF5722] rounded-t-xl transition-all duration-700 relative group/bar hover:bg-orange-600 cursor-pointer shadow-md" style={{ height: `${Math.max(heightM, 2)}%` }}>
+                                         <span className="absolute -top-7 left-1/2 -translate-x-1/2 font-black text-[10px] text-[#FF5722] opacity-0 group-hover/bar:opacity-100 transition-all bg-orange-50 px-2 py-0.5 rounded-md shadow-sm z-10">{yData.Male}</span>
+                                      </div>
+                                      
+                                      {/* Unspecified Bar (Grey) */}
+                                      <div className="w-1/3 max-w-[16px] bg-gray-300 rounded-t-xl transition-all duration-700 relative group/bar hover:bg-gray-400 cursor-pointer shadow-sm" style={{ height: `${Math.max(heightU, 2)}%` }}>
+                                         <span className="absolute -top-7 left-1/2 -translate-x-1/2 font-black text-[10px] text-gray-600 opacity-0 group-hover/bar:opacity-100 transition-all bg-gray-100 px-2 py-0.5 rounded-md shadow-sm z-10">{yData.Unspecified}</span>
+                                      </div>
+                                      
+                                      {/* Female Bar (Indian Flag Green) */}
+                                      <div className="w-1/3 max-w-[16px] bg-[#138808] rounded-t-xl transition-all duration-700 relative group/bar hover:bg-green-700 cursor-pointer shadow-md" style={{ height: `${Math.max(heightF, 2)}%` }}>
+                                         <span className="absolute -top-7 left-1/2 -translate-x-1/2 font-black text-[10px] text-[#138808] opacity-0 group-hover/bar:opacity-100 transition-all bg-green-50 px-2 py-0.5 rounded-md shadow-sm z-10">{yData.Female}</span>
+                                      </div>
+                                      
                                    </div>
-                                   <span className="text-[9px] font-black uppercase tracking-widest text-gray-400">Yr {y}</span>
+                                   <span className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-500 mt-3 border-t border-gray-100 pt-3 w-full text-center">Yr {y}</span>
                                 </div>
                               );
                             })}

@@ -13,6 +13,7 @@
     "@capacitor/cli": "^8.1.0",
     "@capacitor/core": "^8.1.0",
     "@codetrix-studio/capacitor-google-auth": "^3.4.0-rc.4",
+    "@sentry/nextjs": "^10.51.0",
     "@vercel/analytics": "^2.0.1",
     "@vercel/speed-insights": "^2.0.0",
     "axios": "^1.13.5",

@@ -119,6 +119,56 @@ export default function CoordinatorPage() {
   const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://uba-veltech-attendance-backend-system.onrender.com";
   const FRONTEND_URL = process.env.NEXT_PUBLIC_FRONTEND_URL || "https://uba-veltech-attendance-system.vercel.app"; 
 
+  // 👑 THE SINGLE SOURCE OF TRUTH (SSOT) IDENTITY ENGINE
+  const resolveStudentIdentity = (vtuRaw: string | number, currentManifest: any[] = []) => {
+    const vtu = String(vtuRaw || '').replace(/\D/g, '').toUpperCase();
+    if (!vtu) return null;
+
+    const masterRoster = JSON.parse(localStorage.getItem('uba_master_roster') || '[]');
+    const usersCache = JSON.parse(localStorage.getItem('uba_users_cache') || '[]');
+    
+    const masterMatch = masterRoster.find((u: any) => String(u.vtuNumber || u.vtu).replace(/\D/g, '') === vtu);
+    const appMatch = users.find((u: any) => String(u.vtuNumber).replace(/\D/g, '') === vtu) || 
+                     usersCache.find((u: any) => String(u.vtuNumber).replace(/\D/g, '') === vtu);
+    const manifestMatch = currentManifest.find((m: any) => String(m.vtu).replace(/\D/g, '') === vtu);
+
+    // Priority 1: Master Roster (CSV is God)
+    if (masterMatch) {
+       return {
+          ...appMatch,    // Inherits Live Device Locks / FCM Tokens
+          ...masterMatch, // Overwrites with Official Database Data (Dept/Year/Name)
+          studentName: masterMatch.name || appMatch?.name || manifestMatch?.name || `Guest ${vtu}`,
+          dept: masterMatch.dept || appMatch?.dept || 'N/A',
+          year: masterMatch.year || appMatch?.year || 'N/A',
+          gender: masterMatch.gender || appMatch?.gender || 'N/A',
+          phone: masterMatch.phone || appMatch?.phone || 'N/A',
+          isGuest: false,
+          vtuNumber: vtu
+       };
+    }
+    
+    // Priority 2: Live App Users / Temporary Roster
+    if (appMatch) {
+       return {
+          ...appMatch,
+          studentName: appMatch.name || manifestMatch?.name || `Guest ${vtu}`,
+          dept: appMatch.dept || 'N/A',
+          year: appMatch.year || 'N/A',
+          phone: appMatch.phone || 'N/A',
+          isGuest: true,
+          vtuNumber: vtu
+       };
+    }
+
+    // Priority 3: Completely Unknown
+    return {
+       studentName: manifestMatch?.name || `Scanned: ${vtu}`,
+       vtuNumber: vtu,
+       dept: 'N/A', year: 'N/A', phone: 'N/A', gender: 'N/A',
+       isGuest: true, registeredDeviceId: null
+    };
+  };
+
   const fetchMyProfile = async (token: string) => {
     try {
       const res = await fetch(`${API_URL}/user-profile`, { headers: { Authorization: `Bearer ${token}` } });
@@ -169,8 +219,9 @@ export default function CoordinatorPage() {
     fetchMyProfile(token); 
 
     // CACHE-FIRST: Skip heavy roster fetch if we already have it locally
+    // 🚨 THE FIX: If forceFetch is true (User clicked Refresh), IGNORE the cache!
     const cachedRoster = localStorage.getItem('uba_master_roster');
-    const hasRoster = cachedRoster && JSON.parse(cachedRoster).length > 0;
+    const hasRoster = !forceFetch && cachedRoster && JSON.parse(cachedRoster).length > 0;
 
     try {
       const [res, emergencyRes] = await Promise.all([
@@ -468,15 +519,13 @@ export default function CoordinatorPage() {
           setScannerSuccess(`${vtu} VERIFIED`);
           setTimeout(() => setScannerSuccess(''), 1500);
 
-          // --- AUTO-FETCH NAME FOR CAMERA SCAN ---
-          const masterRoster = JSON.parse(localStorage.getItem('uba_master_roster') || '[]');
-          const usersCacheLocal = JSON.parse(localStorage.getItem('uba_users_cache') || '[]');
+          // --- AUTO-FETCH USING SSOT ENGINE ---
           const currentMeeting = meetingsRef.current?.find((m:any) => m.id === meetingIdToUse);
-          const dbUser = masterRoster.find((u:any) => String(u.vtuNumber) === String(vtu)) || usersCacheLocal.find((u:any) => String(u.vtuNumber) === String(vtu));
-          const manifestUser = currentMeeting?.manifest?.find((m:any) => String(m.vtu) === String(vtu));
-          const resolvedName = dbUser?.name || manifestUser?.name || `Guest ${vtu}`;
-          const autoCategory = dbUser ? (dbUser.isGuest ? 'Guest' : 'UBA Member') : 'Guest';
-          // ---------------------------------------
+          const profile = resolveStudentIdentity(vtu, currentMeeting?.manifest);
+          
+          const resolvedName = profile?.studentName || `Guest ${vtu}`;
+          const autoCategory = profile?.isGuest ? 'Guest' : 'UBA Member';
+          // ------------------------------------
 
           if (isOfflineMode) {
               const newScan = { 
@@ -650,18 +699,15 @@ export default function CoordinatorPage() {
     const activePhase = displayMeeting?.type === 'verifiable' ? (displayMeeting.phases || []).find((p:any) => p.status === 'active') : null;
     const targetPhaseId = overridePhaseId || (activePhase ? activePhase.id : 'none');
 
-    // --- AUTO-FETCH REAL NAME & STATUS ---
-    const masterRoster = JSON.parse(localStorage.getItem('uba_master_roster') || '[]');
-
     if (isOfflineMode) {
       const vault = JSON.parse(localStorage.getItem('uba_offline_vault') || '[]');
       const newScans = vtus.map(v => {
         const vtuToUse = v.toUpperCase().trim();
-        const dbUser = masterRoster.find((u:any) => String(u.vtuNumber) === vtuToUse) || users.find((u:any) => String(u.vtuNumber) === vtuToUse);
-        const manifestUser = displayMeeting?.manifest?.find((m:any) => String(m.vtu) === vtuToUse);
         
-        const resolvedName = dbUser?.name || manifestUser?.name || `Guest ${vtuToUse}`;
-        const autoCategory = dbUser ? (dbUser.isGuest ? 'Guest' : 'UBA Member') : 'Guest';
+        // 🚀 SSOT ENGINE INJECTION
+        const profile = resolveStudentIdentity(vtuToUse, displayMeeting?.manifest);
+        const resolvedName = profile?.studentName || `Guest ${vtuToUse}`;
+        const autoCategory = profile?.isGuest ? 'Guest' : 'UBA Member';
 
         return {
           meetingId: selectedMeetingId, action: 'add', vtu: vtuToUse,
@@ -678,11 +724,11 @@ export default function CoordinatorPage() {
     } else {
       for (const v of vtus) {
         const vtuToUse = v.toUpperCase().trim();
-        const dbUser = masterRoster.find((u:any) => String(u.vtuNumber) === vtuToUse) || users.find((u:any) => String(u.vtuNumber) === vtuToUse);
-        const manifestUser = displayMeeting?.manifest?.find((m:any) => String(m.vtu) === vtuToUse);
-        
-        const resolvedName = dbUser?.name || manifestUser?.name || `Guest ${vtuToUse}`;
-        const autoCategory = dbUser ? (dbUser.isGuest ? 'Guest' : 'UBA Member') : 'Guest';
+
+        // 🚀 SSOT ENGINE INJECTION
+        const profile = resolveStudentIdentity(vtuToUse, displayMeeting?.manifest);
+        const resolvedName = profile?.studentName || `Guest ${vtuToUse}`;
+        const autoCategory = profile?.isGuest ? 'Guest' : 'UBA Member';
 
         const payload = { 
           meetingId: selectedMeetingId, action: 'add', vtu: vtuToUse, isOverride: true, 
@@ -1564,35 +1610,27 @@ const handleEndCurrentPhase = async (meetingId: string, phaseIndexToClose: numbe
                         <div className="flex-grow overflow-y-auto max-h-[300px] custom-scrollbar px-2 pb-4">
                           {activeTab === 'verified' && (
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                              {tabVerified.map((at, i) => (
+                              {tabVerified.map((at, i) => {
+                                 const profile = resolveStudentIdentity(at.vtuNumber || at.vtu, manifest);
+                                 return (
                                  <div key={i} className="p-3 rounded-xl border border-gray-200 bg-white flex justify-between items-center shadow-sm group hover:border-orange-300 transition-all">
-                                   <div onClick={() => setSelectedStudent({studentName: at.studentName, vtuNumber: at.vtuNumber || at.vtu})} className="cursor-pointer flex-grow">
-                                     <p className="font-black text-[15px] text-gray-900 truncate">{at.studentName || 'Unknown'}</p>
-                                     <p className="text-[10px] font-mono font-black text-[#FF5722]">{at.vtuNumber || at.vtu}</p>
+                                   <div onClick={() => setSelectedStudent({...at, ...profile, userData: profile})} className="cursor-pointer flex-grow">
+                                     <p className="font-black text-[15px] text-gray-900 truncate">{profile?.studentName}</p>
+                                     <p className="text-[10px] font-mono font-black text-[#FF5722]">{profile?.vtuNumber}</p>
                                    </div>
                                    <div className="flex items-center gap-2">
                                      <span className="text-[9px] font-black text-gray-400">
-                                       {/* Bulletproof time formatter */}
                                        {(() => {
                                          const t = getSafeTime(at.timestamp);
                                          if (!t) return 'Invalid Date';
-                                         return new Date(t).toLocaleString('en-IN', {
-                                           timeZone: 'Asia/Kolkata',
-                                           hour: '2-digit',
-                                           minute: '2-digit',
-                                           hour12: true
-                                         });
+                                         return new Date(t).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true });
                                        })()}
                                      </span>
-                                     <button 
-                                       onClick={(e) => { e.stopPropagation(); if(confirm(`Remove ${at.vtuNumber || at.vtu}?`)) handleLocalRemove(at.vtuNumber || at.vtu); }}
-                                       className="ml-2 p-2 bg-red-50 text-red-600 rounded-xl opacity-0 group-hover:opacity-100 active:scale-90 transition-all shadow-sm border border-red-100"
-                                     >
-                                       ✕
-                                     </button>
+                                     <button onClick={(e) => { e.stopPropagation(); if(confirm(`Remove ${at.vtuNumber || at.vtu}?`)) handleLocalRemove(at.vtuNumber || at.vtu); }} className="ml-2 p-2 bg-red-50 text-red-600 rounded-xl opacity-0 group-hover:opacity-100 active:scale-90 transition-all shadow-sm border border-red-100">✕</button>
                                    </div>
                                  </div>
-                              ))}
+                                 );
+                              })}
                               {tabVerified.length === 0 && <p className="text-gray-300 text-xs font-black uppercase text-center w-full py-10">No verified scans</p>}
                             </div>
                           )}
@@ -1615,27 +1653,16 @@ const handleEndCurrentPhase = async (meetingId: string, phaseIndexToClose: numbe
 
                               <div className="grid md:grid-cols-2 gap-3 overflow-y-auto pr-2 custom-scrollbar max-h-[200px]">
                                 {tabMissing.map((m:any, i:number) => {
-                                   const masterRoster = JSON.parse(localStorage.getItem('uba_master_roster') || '[]');
-                                   const studentData = masterRoster.find((u:any) => String(u.vtuNumber) === String(m.vtu)) || m;
-                                   const phone = studentData.phone || 'N/A';
+                                   const profile = resolveStudentIdentity(m.vtu, manifest);
+                                   const phone = profile?.phone || 'N/A';
                                    return (
-                                   <div key={i} onClick={() => setSelectedStudent({studentName: m.name, vtuNumber: m.vtu, phone})} className="p-4 rounded-2xl border border-red-100 bg-white flex justify-between items-center shadow-sm cursor-pointer hover:border-red-500 transition-colors">
-                                     <div><p className="font-bold text-sm text-gray-900">{m.name || 'Unknown'}</p><p className="text-[10px] font-mono font-bold text-gray-500">{m.vtu}</p></div>
+                                   <div key={i} onClick={() => setSelectedStudent({...profile, userData: profile})} className="p-4 rounded-2xl border border-red-100 bg-white flex justify-between items-center shadow-sm cursor-pointer hover:border-red-500 transition-colors">
+                                     <div><p className="font-bold text-sm text-gray-900">{profile?.studentName}</p><p className="text-[10px] font-mono font-bold text-gray-500">{profile?.vtuNumber}</p></div>
                                      <div className="flex items-center gap-2">
                                          {phone !== 'N/A' && <a href={`tel:${phone}`} onClick={(e) => e.stopPropagation()} className="text-[9px] px-2 py-1 bg-green-100 text-green-700 font-black rounded uppercase tracking-widest hover:bg-green-500 hover:text-white transition-colors">📞 Call</a>}
-                                         <button 
-                                           onClick={(e) => { 
-                                             e.stopPropagation(); 
-                                             if(confirm(`Permanently remove ${m.vtu} from this event?`)) {
-                                               handleManualRemove(m.vtu);
-                                             }
-                                           }} 
-                                           className="text-[9px] px-2 py-1 bg-gray-100 text-gray-600 font-black rounded uppercase tracking-widest hover:bg-red-500 hover:text-white transition-colors"
-                                         >
-                                           🗑️ Remove
-                                         </button>
+                                         <button onClick={(e) => { e.stopPropagation(); if(confirm(`Permanently remove ${m.vtu} from this event?`)) { handleManualRemove(m.vtu); } }} className="text-[9px] px-2 py-1 bg-gray-100 text-gray-600 font-black rounded uppercase tracking-widest hover:bg-red-500 hover:text-white transition-colors">🗑️ Remove</button>
                                          <span className="text-[8px] px-2 py-1 bg-red-100 text-red-600 font-black rounded uppercase">Abandoned</span>
-                                       </div>
+                                     </div>
                                    </div>
                                    );
                                 })}
@@ -1646,23 +1673,21 @@ const handleEndCurrentPhase = async (meetingId: string, phaseIndexToClose: numbe
 
                           {activeTab === 'manual' && (
                             <div className="grid md:grid-cols-2 gap-3">
-                              {tabManual.map((at, i) => (
+                              {tabManual.map((at:any, i:number) => {
+                                 const profile = resolveStudentIdentity(at.vtuNumber || at.vtu, manifest);
+                                 return (
                                  <div key={i} className="p-4 rounded-2xl border border-gray-200 bg-gray-50 flex justify-between items-center group hover:border-red-200 transition-all">
-                                   <div onClick={() => setSelectedStudent({studentName: at.studentName, vtuNumber: at.vtuNumber || at.vtu, enteredBy: at.enteredBy})} className="cursor-pointer flex-grow">
-                                     <p className="font-bold text-sm text-gray-900">{at.studentName || 'Unknown'}</p>
-                                     <p className="text-[10px] font-mono font-bold text-gray-500">{at.vtuNumber || at.vtu}</p>
+                                   <div onClick={() => setSelectedStudent({...at, ...profile, userData: profile})} className="cursor-pointer flex-grow">
+                                     <p className="font-bold text-sm text-gray-900">{profile?.studentName}</p>
+                                     <p className="text-[10px] font-mono font-bold text-gray-500">{profile?.vtuNumber}</p>
                                    </div>
                                    <div className="flex items-center gap-2">
                                      <div className="text-right"><p className="text-[8px] bg-orange-500 text-white px-2 py-1 rounded font-black uppercase tracking-widest mb-1 inline-block">{at.overrideCategory || 'Manual'}</p><p className="text-[8px] font-bold text-orange-400 italic block truncate w-16">By {at.enteredBy?.split('@')[0]}</p></div>
-                                     <button 
-                                       onClick={(e) => { e.stopPropagation(); if(confirm(`Remove ${at.vtuNumber || at.vtu}?`)) handleLocalRemove(at.vtuNumber || at.vtu); }}
-                                       className="ml-2 p-2 bg-red-50 text-red-600 rounded-xl opacity-0 group-hover:opacity-100 active:scale-90 transition-all shadow-sm border border-red-100"
-                                     >
-                                       ✕
-                                     </button>
+                                     <button onClick={(e) => { e.stopPropagation(); if(confirm(`Remove ${at.vtuNumber || at.vtu}?`)) handleLocalRemove(at.vtuNumber || at.vtu); }} className="ml-2 p-2 bg-red-50 text-red-600 rounded-xl opacity-0 group-hover:opacity-100 active:scale-90 transition-all shadow-sm border border-red-100">✕</button>
                                    </div>
                                  </div>
-                              ))}
+                                 );
+                              })}
                               {tabManual.length === 0 && <p className="text-gray-300 text-xs font-black uppercase text-center w-full py-10">No manual entries</p>}
                             </div>
                           )}
@@ -1776,8 +1801,8 @@ const handleEndCurrentPhase = async (meetingId: string, phaseIndexToClose: numbe
                     <div key={m.id} onClick={() => setSelectedMeetingId(m.id)} className={`p-5 rounded-2xl cursor-pointer transition-all ${m.isSOS ? `border-4 border-red-600 bg-red-50 ${isSelected ? 'shadow-xl scale-105' : 'hover:border-red-400'}` : isSelected ? `bg-[#111827] border-2 border-[#FF5722] shadow-xl scale-105` : `border-2 border-gray-50 hover:border-[#FF5722]/40 bg-[#FFF9F5]/30`}`}>
                       <div className="flex justify-between items-start">
                         <p className={`font-black text-sm capitalize truncate w-32 ${m.isSOS ? 'text-red-700' : isSelected ? 'text-white' : 'text-gray-900'}`}>{m.isSOS ? `🚨 ${m.title || m.meetingTitle}` : m.title}</p>
-                        <span className={`text-[8px] px-2 py-1 rounded font-black tracking-widest ${m.isSOS ? 'bg-red-600 text-white animate-pulse' : m.status === 'active' ? 'bg-[#FF5722] text-white animate-pulse' : (isSelected ? 'text-gray-400' : 'text-gray-300')}`}>
-                           {m.isSOS ? 'SOS' : m.status === 'active' ? 'LIVE' : 'CLOSED'}
+                        <span className={`text-[8px] px-2 py-1 rounded font-black tracking-widest ${m.isSOS ? 'bg-red-600 text-white animate-pulse' : (m.status === 'active' && m.attendanceActive) ? 'bg-[#FF5722] text-white animate-pulse' : (isSelected ? 'text-gray-400' : 'text-gray-300')}`}>
+                           {m.isSOS ? 'SOS' : (m.status === 'active' && m.attendanceActive) ? 'LIVE' : 'CLOSED'}
                         </span>
                       </div>
                       <p className={`text-[9px] font-bold uppercase mt-2 ${m.isSOS ? 'text-red-500' : isSelected ? 'text-gray-400' : 'text-gray-500'}`}>{m.isSOS ? `🚨 EMERGENCY SESSION BY: ${m.coordinatorEmail || 'Unknown'}` : `Host: ${m.createdByName || 'Coord'}`}</p>
