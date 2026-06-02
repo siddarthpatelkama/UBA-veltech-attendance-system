@@ -3,6 +3,9 @@ import Link from 'next/link';
 export const metadata = {
   title: 'UBA Attendance System | Universal Control',
   description: 'Enterprise-grade, offline-first biometric and QR attendance tracking system.',
+  verification: {
+    google: 'SboLln7KFZdT8XRI28Gm5Nax4pJRWZcYcCeb1rDI4Y8', 
+  },
 };
 
 export default function PublicLandingPage() {
