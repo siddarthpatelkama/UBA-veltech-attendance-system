@@ -55,7 +55,7 @@ export default function NetflixStyleSplash() {
   return (
     <div className="relative min-h-screen bg-white overflow-hidden font-sans flex flex-col items-center justify-center">
       {/* Existing CSS Animations */}
-      <style dangerouslySetInnerHTML={{__html: `
+      <style>{`
         @keyframes slideUp { 0% { opacity: 0; transform: translateY(15px); } 100% { opacity: 1; transform: translateY(0); } }
         @keyframes expandText { 0% { letter-spacing: -0.5em; opacity: 0; } 100% { letter-spacing: 0.05em; opacity: 1; } }
         @keyframes popIn { 0% { opacity: 0; transform: scale(0.9); } 100% { opacity: 1; transform: scale(1); } }
@@ -64,7 +64,7 @@ export default function NetflixStyleSplash() {
         .animate-expand { animation: expandText 1s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
         .animate-pop { animation: popIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.1) forwards; }
         .type-effect { display: inline-block; overflow: hidden; white-space: nowrap; width: 0; animation: typing 1s steps(40, end) forwards; }
-      `}} />
+      `}</style>
 
       <div className="relative flex flex-col items-center justify-center w-full mb-20">
         

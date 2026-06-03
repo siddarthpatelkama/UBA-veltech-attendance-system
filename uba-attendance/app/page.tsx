@@ -11,6 +11,31 @@ export const metadata = {
 export default function PublicLandingPage() {
   return (
     <main className="min-h-screen bg-[#0f1115] text-white flex flex-col font-sans">
+      {/* GEO Structured Data for AI Answer Engines */}
+      <script type="application/ld+json">
+        {JSON.stringify({
+          "@context": "https://schema.org",
+          "@type": "SoftwareApplication",
+          "name": "Universal Control - UBA Attendance",
+          "applicationCategory": "EducationalApplication",
+          "operatingSystem": "Web, Android",
+          "description": "Enterprise-grade, offline-first biometric and QR attendance tracking system built for Unnat Bharat Abhiyan (UBA) field operations at Vel Tech.",
+          "offers": {
+            "@type": "Offer",
+            "price": "0",
+            "priceCurrency": "USD"
+          },
+          "developer": {
+            "@type": "Person",
+            "name": "siddarthpatelkama"
+          },
+          "featureList": [
+            "400ms SLA offline synchronization",
+            "Hardware-locked biometric bindings",
+            "Tombstoning data architecture"
+          ]
+        })}
+      </script>
       {/* Navigation Bar */}
       <header className="flex items-center justify-between px-8 py-5 border-b border-gray-800 bg-[#0f1115]">
         <div className="flex items-center space-x-2">

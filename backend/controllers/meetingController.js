@@ -281,12 +281,19 @@ exports.syncOfflineAttendance = async (req, res) => {
     }
 
     const batch = db.batch();
+    const results = { success: 0, failed: 0 };
+
+    // 1. Parallelize verification for standard meetings (Massive speed boost)
+    const standardScans = scans.filter(s => !s.isEmergency);
+    const meetingIds = [...new Set(standardScans.map(s => s.meetingId))];
+    const meetingDocs = await Promise.all(meetingIds.map(id => db.collection("meetings").doc(id).get()));
+    const validMeetings = new Set(meetingDocs.filter(doc => doc.exists).map(doc => doc.id));
 
     for (const scan of scans) {
+      const vtuClean = scan.vtu ? scan.vtu.toString().replace(/\D/g, '').trim() : 'UNKNOWN';
+
       if (scan.isEmergency) {
         // 🚨 EMERGENCY ROUTING: Send to completely separate tables
-
-        // 1. Create/Merge Emergency Meeting Record
         const emergencyMeetingRef = db.collection('emergency_meetings').doc(scan.meetingId);
         batch.set(emergencyMeetingRef, {
           id: scan.meetingId,
@@ -296,11 +303,10 @@ exports.syncOfflineAttendance = async (req, res) => {
           coordinatorId: scan.enteredBy || 'Offline_Coord'
         }, { merge: true });
 
-        // 2. Log Student in Emergency Attendance
-        const emergencyAttendanceRef = db.collection('emergency_attendance').doc(`${scan.meetingId}_${scan.vtu}`);
+        const emergencyAttendanceRef = db.collection('emergency_attendance').doc(`${scan.meetingId}_${vtuClean}`);
         batch.set(emergencyAttendanceRef, {
           meetingId: scan.meetingId,
-          vtuNumber: scan.vtu,
+          vtuNumber: vtuClean,
           studentName: scan.studentName || 'Unknown',
           timestamp: scan.timestamp || Date.now(),
           phaseId: scan.phaseId || 'none',
@@ -309,9 +315,14 @@ exports.syncOfflineAttendance = async (req, res) => {
           emergencyDeviceId: scan.emergencyDeviceId || 'N/A',
           isEmergency: true
         }, { merge: true });
-
+        
+        results.success++;
       } else {
-        // 🟢 STANDARD ROUTING: Normal offline vault logic
+        // 🟢 STANDARD ROUTING
+        if (!validMeetings.has(scan.meetingId)) {
+          results.failed++;
+          continue;
+        }
 
         // 1. Update standard meeting timestamp
         const meetingRef = db.collection('meetings').doc(scan.meetingId);
@@ -320,23 +331,27 @@ exports.syncOfflineAttendance = async (req, res) => {
         }, { merge: true });
 
         // 2. Log Student in Standard Attendance
-        const attendanceRef = db.collection('attendance').doc(`${scan.meetingId}_${scan.vtu}_${scan.phaseId || 'none'}`);
+        const attendanceRef = db.collection('attendance').doc(`${scan.meetingId}_${vtuClean}_${scan.phaseId || 'none'}`);
         batch.set(attendanceRef, {
           meetingId: scan.meetingId,
-          vtuNumber: scan.vtu,
+          vtuNumber: vtuClean,
           studentName: scan.studentName || 'Unknown',
           timestamp: scan.timestamp || Date.now(),
           phaseId: scan.phaseId || 'none',
           isOverride: scan.isOverride || false,
           enteredBy: scan.enteredBy || 'System'
         }, { merge: true });
+        
+        results.success++;
       }
     }
 
-    // Commit all writes simultaneously (Costs only 1 network request!)
-    await batch.commit();
+    if (results.success > 0) await batch.commit();
 
-    res.status(200).json({ message: "Cloud Sync successful, emergency data routed correctly." });
+    res.status(200).json({ 
+      message: "Cloud Sync successful, emergency data routed correctly.", 
+      ...results 
+    });
 
   } catch (error) {
     console.error("Critical Offline Sync Error:", error);
