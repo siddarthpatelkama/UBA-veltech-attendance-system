@@ -1,16 +1,15 @@
-import type { MetadataRoute } from 'next';
-
-export const dynamic = 'force-static';
+import { MetadataRoute } from 'next';
 
 export default function robots(): MetadataRoute.Robots {
+  const baseUrl = process.env.NEXT_PUBLIC_FRONTEND_URL || 'https://uba-veltech-attendance-system.vercel.app';
+
   return {
-    rules: [
-      {
-        userAgent: '*',
-        allow: '/',
-        disallow: ['/admin/', '/coordinator/', '/emergency/'],
-      },
-    ],
-    sitemap: 'https://uba-veltech-attendance-system.vercel.app/sitemap.xml',
+    rules: {
+      userAgent: '*',
+      allow: '/',
+      // Disallow Googlebot from crawling authenticated routes
+      disallow: ['/api/', '/admin', '/coordinator', '/home'],
+    },
+    sitemap: `${baseUrl}/sitemap.xml`, // Next.js automatically maps sitemap.ts to this URL
   };
 }

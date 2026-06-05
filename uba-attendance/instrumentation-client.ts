@@ -9,6 +9,9 @@ Sentry.init({
   // NEXT_PUBLIC_SENTRY_DSN to the full URL provided by Sentry (public DSN).
   dsn: process.env.NEXT_PUBLIC_SENTRY_DSN || "https://226edcd54f92b293a5525bde787b5608@o4511316597342208.ingest.us.sentry.io/4511390241325056",
 
+  // Bypass ad-blockers by tunneling requests through our own domain
+  tunnel: "/monitoring-tunnel",
+
   // Add optional integrations for additional features
   integrations: [Sentry.replayIntegration()],
 

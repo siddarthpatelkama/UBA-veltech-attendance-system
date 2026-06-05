@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import { auth } from '@/lib/firebase';
@@ -10,9 +10,24 @@ export default function NetflixStyleSplash() {
   const [phase, setPhase] = useState(0);
   const router = useRouter();
   const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://uba-veltech-attendance-backend-system.onrender.com";
+  const userRef = useRef<any>(null);
 
   useEffect(() => {
-    // 7-Second Animation Timeline
+    // 1. WARM UP ROUTE PREFETCHING
+    // Download the JS chunks for likely destinations in the background
+    router.prefetch('/coordinator');
+    router.prefetch('/home');
+    router.prefetch('/admin');
+    router.prefetch('/login');
+
+    // 2. WARM UP FIREBASE AUTH (IndexedDB)
+    // Trigger the auth listener immediately to resolve the token from IndexedDB.
+    // We do NOT route here; we just let it establish the background connection.
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      userRef.current = user;
+    });
+
+    // 3. THE ANIMATION TIMER
     const timers = [
       setTimeout(() => setPhase(1), 300),   // U
       setTimeout(() => setPhase(2), 600),   // B
@@ -20,37 +35,37 @@ export default function NetflixStyleSplash() {
       setTimeout(() => setPhase(4), 2200),  // UBA Logo Pop & Netflix Expansion
       setTimeout(() => setPhase(5), 4500),  // SWAP to Vel Tech Photo
       setTimeout(() => setPhase(6), 5800),  // Show Architect ID
-      setTimeout(() => setPhase(7), 7000),  // Finish
-    ];
-    return () => timers.forEach(clearTimeout);
-  }, []);
+      setTimeout(() => {
+        setPhase(7); // Finish animation
 
-  // AUTOMATIC REDIRECT LOGIC
-  useEffect(() => {
-    if (phase === 7) {
-      const unsub = onAuthStateChanged(auth, async (user) => {
-        if (!user) {
-          router.replace('/login');
-        } else {
-          try {
-            const token = await user.getIdToken();
-            const res = await fetch(`${API_URL}/whoami`, {
+        // 4. ZERO-LATENCY HANDOFF
+        // Animation finished. auth.currentUser is already resolved.
+        if (userRef.current) {
+          // We have a user, get the token and route by role
+          userRef.current.getIdToken().then((token: string) => {
+            fetch(`${API_URL}/whoami`, {
               headers: { Authorization: `Bearer ${token}` }
-            });
-            const data = await res.json();
-            
-            // Send to respective dashboards based on role
-            if (data.role === 'head') router.replace('/admin');
-            else if (data.role === 'coordinator') router.replace('/coordinator');
-            else router.replace('/home');
-          } catch (e) {
-            router.replace('/login');
-          }
+            })
+            .then(res => res.json())
+            .then(data => {
+              if (data.role === 'head') router.replace('/admin');
+              else if (data.role === 'coordinator' || data.role === 'student_coordinator') router.replace('/coordinator');
+              else router.replace('/home');
+            })
+            .catch(() => router.replace('/login'));
+          });
+        } else {
+          // No user found in IndexedDB
+          router.replace('/login');
         }
-      });
-      return () => unsub();
-    }
-  }, [phase, router, API_URL]);
+      }, 7000),
+    ];
+
+    return () => {
+      timers.forEach(clearTimeout);
+      unsubscribe();
+    };
+  }, [router, API_URL]);
 
   // Ensure portal page is tagged — inject gtag only if not already present
   useEffect(() => {
