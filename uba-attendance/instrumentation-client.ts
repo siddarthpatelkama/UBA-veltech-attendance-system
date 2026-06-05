@@ -28,4 +28,7 @@ Sentry.init({
   sendDefaultPii: true,
 });
 
+// 🚨 ADD THIS LINE ONLY FOR TESTING
+if (typeof window !== 'undefined') { (window as any).Sentry = Sentry; }
+
 export const onRouterTransitionStart = Sentry.captureRouterTransitionStart;
