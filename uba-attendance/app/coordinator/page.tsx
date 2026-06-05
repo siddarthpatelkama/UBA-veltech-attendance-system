@@ -182,7 +182,7 @@ export default function CoordinatorPage() {
           try {
             const OneSignal = (window as any).plugins?.OneSignal;
             if (OneSignal) {
-              OneSignal.initialize("19e04964-ec0f-44c4-a1df-e56989f568f8");
+              OneSignal.initialize(process.env.NEXT_PUBLIC_ONESIGNAL_APP_ID);
               OneSignal.Notifications.requestPermission(true);
               // Tag them as a Coordinator!
               const vtuExtract = data.vtuNumber || auth.currentUser?.email?.split('@')[0].toUpperCase();

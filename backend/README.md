@@ -17,10 +17,13 @@ Express server for UBA Attendance System.
 3. **Setup .env File**
    - Copy `.env.example` to `.env`
    - Fill in the values:
-     - `FIREBASE_CLIENT_EMAIL`: From the downloaded JSON (client_email field)
-     - `FIREBASE_PRIVATE_KEY`: From the downloaded JSON (private_key field)
-     - **Important**: Replace newlines in private key with `\n`
+     - `FIREBASE_SERVICE_ACCOUNT`: Full Firebase service account JSON as a single-line string
      - `SECRET_KEY`: Must match the secret key used in frontend token generation
+     - `QR_SECRET`: Optional override for the QR signing secret if you do not want to use `SECRET_KEY`
+     - `UBA_HEAD_EMAIL`: Comma-separated list of head/admin emails allowed into admin routes
+     - `FRONTEND_URL`: Frontend origin used for redirects and CORS-related checks
+     - `SENTRY_DSN`: Backend Sentry DSN for server error reporting
+     - `PORT`: Optional server port override, usually set by the host platform
 
 ## Running the Server
 
@@ -68,8 +71,8 @@ Marks student attendance with QR validation.
 
 ## Deployment
 
-For Railway deployment:
-1. Set environment variables in Railway dashboard
+For  vercel deployment:
+1. Set environment variables in vercel  dashboard
 2. Deploy the backend folder
-3. Update frontend `NEXT_PUBLIC_API_URL` to point to Railway URL
+3. Update frontend `NEXT_PUBLIC_API_URL` to point to  vercel URL
 

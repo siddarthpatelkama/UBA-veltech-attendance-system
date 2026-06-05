@@ -55,6 +55,17 @@ export default function RootLayout({
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="default" />
         <meta name="apple-mobile-web-app-title" content="UBA Portal" />
+        <script async src="https://www.googletagmanager.com/gtag/js?id=G-6YLNBCXHFT"></script>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              window.dataLayer = window.dataLayer || [];
+              function gtag(){dataLayer.push(arguments);}
+              gtag('js', new Date());
+              gtag('config', 'G-6YLNBCXHFT');
+            `,
+          }}
+        />
       </head>
       <body className="antialiased bg-white text-gray-900 min-h-screen flex flex-col">
         <ClientLayout>{children}</ClientLayout>

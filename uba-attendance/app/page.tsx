@@ -1,8 +1,34 @@
 import Link from 'next/link';
 
 export const metadata = {
-  title: 'UBA Attendance System | Universal Control',
-  description: 'Enterprise-grade, offline-first biometric and QR attendance tracking system.',
+  title: 'UBA Vel Tech | Universal Control Attendance System',
+  description: 'Official offline-first biometric and QR attendance tracking portal for Unnat Bharat Abhiyan (UBA) field operations at Vel Tech University.',
+  keywords: [
+    'UBA Vel Tech',
+    'Unnat Bharat Abhiyan attendance',
+    'Vel Tech University UBA',
+    'UBA student portal',
+    'Vel Tech offline attendance',
+    'UBA field operations system',
+    'VTU attendance tracker'
+  ],
+  authors: [{ name: 'Siddarth Patel' }],
+  openGraph: {
+    title: 'UBA Vel Tech | Universal Control',
+    description: 'Hardware-locked, offline-ready attendance tracking for UBA field operations.',
+    url: 'https://uba-veltech-attendance-system.vercel.app',
+    siteName: 'UBA Attendance System',
+    images: [
+      {
+        url: '/uba-logo.png', // Ensure this file exists in your public folder
+        width: 800,
+        height: 600,
+        alt: 'Unnat Bharat Abhiyan Logo',
+      },
+    ],
+    locale: 'en_IN',
+    type: 'website',
+  },
   verification: {
     google: 'SboLln7KFZdT8XRI28Gm5Nax4pJRWZcYcCeb1rDI4Y8', 
   },

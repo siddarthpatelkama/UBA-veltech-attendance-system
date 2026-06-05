@@ -4,11 +4,18 @@
 
 import * as Sentry from "@sentry/nextjs";
 
+const isBot = typeof navigator !== 'undefined' && /Googlebot|bingbot|yandex|baiduspider|Slurp/i.test(navigator.userAgent);
+
 Sentry.init({
-  dsn: "https://226edcd54f92b293a5525bde787b5608@o4511316597342208.ingest.us.sentry.io/4511390241325056",
+  dsn: process.env.NEXT_PUBLIC_SENTRY_DSN,
 
   // Add optional integrations for additional features
-  integrations: [Sentry.replayIntegration()],
+  integrations: isBot ? [] : [Sentry.replayIntegration()],
+
+  beforeSend(event) {
+    if (isBot) return null;
+    return event;
+  },
 
   // Define how likely traces are sampled. Adjust this value in production, or use tracesSampler for greater control.
   tracesSampleRate: 1,

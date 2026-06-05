@@ -84,7 +84,11 @@ export default function HomePage() {
   // --- UPCOMING EVENTS STATE ---
   const [upcomingEvents, setUpcomingEvents] = useState<any[]>([]);
 
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://uba-veltech-attendance-backend-system.onrender.com";
+  const API_URL = process.env.NEXT_PUBLIC_API_URL;
+
+  if (!API_URL) {
+    console.error("CRITICAL PROTOCOL VIOLATION: NEXT_PUBLIC_API_URL is undefined. Check your .env.local file.");
+  }
 
   // ==========================================
   // 1. DEVICE ID GENERATION & NETWORK LOGIC
@@ -216,7 +220,7 @@ export default function HomePage() {
           (window as any).OneSignalDeferred = (window as any).OneSignalDeferred || [];
           (window as any).OneSignalDeferred.push(function(OneSignal: any) {
             OneSignal.init({ 
-              appId: "19e04964-ec0f-44c4-a1df-e56989f568f8",
+              appId: process.env.NEXT_PUBLIC_ONESIGNAL_APP_ID,
               allowLocalhostAsSecureOrigin: true, // Only for development
             });
             // Tag them so you can target them by VTU in the dashboard
