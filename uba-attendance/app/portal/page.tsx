@@ -52,6 +52,22 @@ export default function NetflixStyleSplash() {
     }
   }, [phase, router, API_URL]);
 
+  // Ensure portal page is tagged — inject gtag only if not already present
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    // Avoid double-injecting if root layout already added gtag
+    if ((window as any).gtag) return;
+
+    const script = document.createElement('script');
+    script.async = true;
+    script.src = 'https://www.googletagmanager.com/gtag/js?id=G-6YLNBCXHFT';
+    document.head.appendChild(script);
+
+    const inline = document.createElement('script');
+    inline.innerHTML = `window.dataLayer = window.dataLayer || []; function gtag(){dataLayer.push(arguments);} gtag('js', new Date()); gtag('config', 'G-6YLNBCXHFT');`;
+    document.head.appendChild(inline);
+  }, []);
+
   return (
     <div className="relative min-h-screen bg-white overflow-hidden font-sans flex flex-col items-center justify-center">
       {/* Existing CSS Animations */}
