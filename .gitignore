@@ -3,3 +3,9 @@
 .env
 node_modules
 serviceAccountKey.json
+
+# AI memory and analysis directories (never commit)
+.ai-memory/
+.agent-reports/
+.security-scans/
+.ai-analysis/

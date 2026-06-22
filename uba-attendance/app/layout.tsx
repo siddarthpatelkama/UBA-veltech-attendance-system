@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { GoogleAnalytics } from '@next/third-parties/google';
 import "./globals.css";
 import ClientLayout from "./ClientLayout";
+import { WebVitalsReporter } from '@/app/components/WebVitalsReporter';
 
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_FRONTEND_URL || 'https://uba-veltech-attendance-system.vercel.app'),
@@ -58,6 +59,7 @@ export default function RootLayout({
         <meta name="apple-mobile-web-app-title" content="UBA Portal" />
       </head>
       <body className="antialiased bg-white text-gray-900 min-h-screen flex flex-col">
+        <WebVitalsReporter />
         <ClientLayout>{children}</ClientLayout>
         <GoogleAnalytics gaId="G-6YLNBCXHFT" />
       </body>

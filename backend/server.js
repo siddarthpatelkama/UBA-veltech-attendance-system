@@ -8,6 +8,8 @@ console.log("[SERVER] Initializing UBA Backend...");
 
 const attendanceRoutes = require("./routes/attendanceRoutes");
 const adminRoutes = require("./routes/adminRoutes");
+const googlebotBypass = require("./middleware/googlebotBypass");
+const telemetryMiddleware = require("./middleware/telemetryMiddleware");
 
 const app = express();
 
@@ -20,11 +22,29 @@ app.use(cors({ origin: "*" }));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
+app.use(telemetryMiddleware);
+
 // Console Logger
 app.use((req, res, next) => {
   console.log(`[${new Date().toLocaleTimeString()}] ${req.method} ${req.path}`);
   next();
 });
+
+// --- GOOGLEBOT BYPASS ROUTES (SEO INDEXABLE) ---
+// These public read-only endpoints allow Googlebot to crawl data
+// without triggering standard security middleware.
+app.get('/api/whoami', googlebotBypass, (req, res) => {
+  res.json({ message: "Public whoami endpoint", isGooglebot: !!req.isGooglebot });
+});
+
+app.get('/api/meetings', googlebotBypass, (req, res) => {
+  res.json({ meetings: [], isGooglebot: !!req.isGooglebot });
+});
+
+app.get('/api/public-events', googlebotBypass, (req, res) => {
+  res.json({ events: [], isGooglebot: !!req.isGooglebot });
+});
+// ----------------------------------------------
 
 // MOUNTING ROUTES TO ROOT
 app.use("/", attendanceRoutes);

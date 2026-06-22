@@ -1,3 +1,5 @@
 node_modules/
 .env
 serviceAccountKey.json
+scripts/*_backup.json
+scripts/backupUsers.js
