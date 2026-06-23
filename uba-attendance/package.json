@@ -30,6 +30,7 @@
     "react-dom": "19.2.3",
     "react-leaflet": "^5.0.0",
     "react-qr-code": "^2.0.18",
+    "recharts": "^3.9.0",
     "swr": "^2.4.1"
   },
   "devDependencies": {
